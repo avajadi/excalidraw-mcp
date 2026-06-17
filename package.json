@@ -1,0 +1,28 @@
+{
+  "name": "excalidraw-mcp",
+  "version": "1.0.0",
+  "description": "MCP server that generates .excalidraw scene files from high-level shape specs.",
+  "type": "module",
+  "bin": {
+    "excalidraw-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}
