@@ -194,20 +194,55 @@ function center(el: AnyElement): { x: number; y: number } {
   return { x: el.x + el.width / 2, y: el.y + el.height / 2 };
 }
 
+const BINDING_GAP = 4;
+
+/**
+ * Point where a ray from `box`'s center toward `towards` crosses the box border,
+ * pushed `gap` px further out. This is what makes a bound arrow start/end at the
+ * edge of a shape instead of its center. Uses the bounding box for all shapes —
+ * exact for rectangles, a close approximation for ellipse/diamond.
+ */
+function borderPoint(
+  box: AnyElement,
+  towards: { x: number; y: number },
+  gap: number,
+): { x: number; y: number } {
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  const dx = towards.x - cx;
+  const dy = towards.y - cy;
+  if (dx === 0 && dy === 0) return { x: cx, y: cy };
+
+  const hw = box.width / 2;
+  const hh = box.height / 2;
+  // Scale the direction so the longer-axis component just reaches the border.
+  const t = 1 / Math.max(Math.abs(dx) / hw, Math.abs(dy) / hh);
+  const len = Math.hypot(dx, dy);
+  return {
+    x: cx + dx * t + (dx / len) * gap,
+    y: cy + dy * t + (dy / len) * gap,
+  };
+}
+
 function makeLinear(spec: ElementSpec, byId: Map<string, AnyElement>): AnyElement {
   const id = spec.id ?? randomId();
   const startEl = spec.startId ? byId.get(spec.startId) : undefined;
   const endEl = spec.endId ? byId.get(spec.endId) : undefined;
 
-  const start = startEl ? center(startEl) : { x: spec.x ?? 0, y: spec.y ?? 0 };
-  const end = endEl
+  // Anchor each unbound end at its explicit coordinate; aim bound ends at the
+  // *other* end's center, then clip to the border so arrows touch edges.
+  const startCenter = startEl ? center(startEl) : { x: spec.x ?? 0, y: spec.y ?? 0 };
+  const endCenter = endEl
     ? center(endEl)
-    : { x: spec.x2 ?? start.x + 100, y: spec.y2 ?? start.y };
+    : { x: spec.x2 ?? startCenter.x + 100, y: spec.y2 ?? startCenter.y };
+
+  const start = startEl ? borderPoint(startEl, endCenter, BINDING_GAP) : startCenter;
+  const end = endEl ? borderPoint(endEl, startCenter, BINDING_GAP) : endCenter;
 
   const startBinding = startEl
-    ? { elementId: startEl.id, focus: 0, gap: 4 }
+    ? { elementId: startEl.id, focus: 0, gap: BINDING_GAP }
     : null;
-  const endBinding = endEl ? { elementId: endEl.id, focus: 0, gap: 4 } : null;
+  const endBinding = endEl ? { elementId: endEl.id, focus: 0, gap: BINDING_GAP } : null;
   if (startEl) startEl.boundElements.push({ type: spec.type, id });
   if (endEl) endEl.boundElements.push({ type: spec.type, id });
 
