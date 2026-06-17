@@ -88,6 +88,8 @@ type AnyElement = Record<string, unknown> & {
 const DEFAULT_W = 160;
 const DEFAULT_H = 80;
 const LINE_HEIGHT = 1.25;
+const LABEL_PAD_X = 12;
+const LABEL_PAD_Y = 8;
 
 function randomId(): string {
   return randomBytes(12).toString("base64url").slice(0, 16);
@@ -150,7 +152,10 @@ function baseElement(
 }
 
 function makeBoundLabel(container: AnyElement, text: string, fontSize: number): AnyElement {
-  const { width, height } = measureText(text, fontSize);
+  const m = measureText(text, fontSize);
+  // Keep the text within the container's interior so it never overflows.
+  const width = Math.min(m.width, container.width - LABEL_PAD_X * 2);
+  const height = m.height;
   const el = baseElement("text", 0, 0, width, height, {});
   container.boundElements.push({ type: "text", id: el.id });
   return {
@@ -290,14 +295,19 @@ export function buildScene(specs: ElementSpec[], opts: SceneOptions = {}) {
       continue;
     }
 
-    const el = baseElement(
-      spec.type,
-      spec.x ?? 0,
-      spec.y ?? 0,
-      spec.width ?? DEFAULT_W,
-      spec.height ?? DEFAULT_H,
-      spec,
-    );
+    let width = spec.width ?? DEFAULT_W;
+    let height = spec.height ?? DEFAULT_H;
+
+    // Grow the box so its bound label fits. Ellipses/diamonds only expose an
+    // inscribed area for text, so they need extra room beyond the text metrics.
+    if (spec.label) {
+      const m = measureText(spec.label, spec.fontSize ?? 20);
+      const factor = spec.type === "rectangle" ? 1 : 1.5;
+      width = Math.max(width, Math.ceil(m.width * factor + LABEL_PAD_X * 2));
+      height = Math.max(height, Math.ceil(m.height * factor + LABEL_PAD_Y * 2));
+    }
+
+    const el = baseElement(spec.type, spec.x ?? 0, spec.y ?? 0, width, height, spec);
     shapes.push(el);
     byId.set(el.id, el);
 
