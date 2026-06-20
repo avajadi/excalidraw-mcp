@@ -132,9 +132,53 @@ open a specific scene directly with `?scene=<name>`, where `<name>` matches the 
 given to `create_scene`.) The canvas updates in place, keeping your viewport and selection.
 Move shapes in the browser and `read_scene` returns the updated geometry.
 
-Relay env vars: `RELAY_PORT` (default `3030`) and `EXCALIDRAW_OUTPUT_DIR` (shared with the
-MCP server — both must point at the same directory). The relay and app are a single
-process, so you can run them in one container next to your existing Excalidraw deployment.
+Relay env vars: `RELAY_PORT` (default `3030`) and `EXCALIDRAW_OUTPUT_DIR` (where scenes are
+persisted). In relay mode the MCP server talks to the relay over HTTP and never writes
+files itself, so only the relay needs the output directory.
+
+### Docker (relay + web)
+
+The relay and the companion app are one process, so they ship as **one image** (built by
+the included multi-stage `Dockerfile`). The MCP server is *not* containerized as a service —
+Claude spawns it on the host over stdio and it reaches the relay over the published port.
+
+```bash
+# build + start the relay (serves the web app on http://localhost:3030)
+docker compose up -d --build
+
+# …or without compose:
+docker build -t excalidraw-mcp-relay .
+docker run -d --name excalidraw-relay \
+  -p 127.0.0.1:3030:3030 \
+  -v excalidraw-scenes:/data \
+  excalidraw-mcp-relay
+```
+
+Scenes persist in the `excalidraw-scenes` named volume (mounted at `/data`, the container's
+`EXCALIDRAW_OUTPUT_DIR`). To use a host directory instead, swap the volume for a bind mount,
+e.g. `-v /path/to/scenes:/data`.
+
+Then point the (host-side) MCP server at the container and register it with Claude:
+
+```bash
+claude mcp add excalidraw \
+  --env EXCALIDRAW_RELAY_URL=http://localhost:3030 \
+  -- node /absolute/path/to/excalidraw-mcp/dist/index.js
+```
+
+Open `http://localhost:3030/` and use it exactly as above. The compose file binds the port
+to `127.0.0.1` because the scene API and WebSocket are **unauthenticated** — if you expose
+the relay beyond localhost, put an authenticating TLS proxy in front of it.
+
+To verify the container is up: `curl localhost:3030/scenes` returns a JSON list (`[]` when
+empty); `docker compose logs -f relay` shows the startup line and the output dir.
+
+#### Running the MCP in Docker too (optional)
+
+If you'd rather not run Node on the host, the same repo can run the MCP as a per-session
+container. Add it to Claude as a `docker run -i` command on the same network as the relay,
+with `EXCALIDRAW_RELAY_URL` pointing at the relay service. It stays ephemeral (one process
+per session) — it is never a long-running container.
 
 ## Example prompt
 

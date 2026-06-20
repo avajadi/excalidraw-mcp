@@ -1,0 +1,20 @@
+# The relay + web companion app as one service. The MCP server is NOT a service
+# here: Claude spawns it on the host over stdio and points it at this relay via
+# EXCALIDRAW_RELAY_URL=http://localhost:3030 (see README).
+services:
+  relay:
+    build: .
+    image: excalidraw-mcp-relay
+    container_name: excalidraw-relay
+    # Bind to localhost only — the scene API and WebSocket are unauthenticated.
+    ports:
+      - "127.0.0.1:3030:3030"
+    environment:
+      RELAY_PORT: "3030"
+      EXCALIDRAW_OUTPUT_DIR: /data
+    volumes:
+      - excalidraw-scenes:/data
+    restart: unless-stopped
+
+volumes:
+  excalidraw-scenes:
