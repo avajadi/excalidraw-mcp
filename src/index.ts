@@ -249,7 +249,9 @@ server.tool(
     const byId = new Map(els.map((e) => [e.id as string, e]));
 
     const summary = els
-      .filter((e) => !(e.type === "text" && e.containerId)) // labels fold into shapes
+      // Skip tombstones (Excalidraw soft-deletes with isDeleted) and bound text
+      // labels (folded into their shape below).
+      .filter((e) => !e.isDeleted && !(e.type === "text" && e.containerId))
       .map((e) => {
         const row: Record<string, unknown> = {
           id: e.id,
@@ -268,7 +270,8 @@ server.tool(
           const lbl = ((e.boundElements ?? []) as Array<{ type: string; id: string }>).find(
             (b) => b.type === "text",
           );
-          if (lbl) row.label = byId.get(lbl.id)?.text ?? "";
+          const lblEl = lbl ? byId.get(lbl.id) : undefined;
+          if (lblEl && !lblEl.isDeleted) row.label = lblEl.text ?? "";
         }
         return row;
       });

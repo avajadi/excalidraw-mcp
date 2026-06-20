@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Excalidraw,
+  Sidebar,
   restoreElements,
   CaptureUpdateAction,
 } from "@excalidraw/excalidraw";
@@ -53,6 +54,8 @@ function App() {
   const [follow, setFollow] = useState<boolean>(true);
   const followRef = useRef(follow);
   followRef.current = follow;
+  // The scenes sidebar is docked on the left by default.
+  const [docked, setDocked] = useState<boolean>(true);
   // Signature of the scene we last received or sent — the echo-loop guard.
   const lastSigRef = useRef<string>("");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -207,82 +210,117 @@ function App() {
     [fetchScenes],
   );
 
-  // Scene picker rendered into Excalidraw's top-right UI slot.
+  // Always include the open scene, even if it has not been saved to a file yet.
   const options = scenes.some((s) => s.id === currentScene)
     ? scenes
     : [...scenes, { id: currentScene, name: currentScene.replace(/\.excalidraw$/, "") }];
 
-  const renderPicker = () => (
-    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-      <select
-        value={currentScene}
-        onChange={(e) => switchScene(e.target.value)}
-        title="Open a scene from the output directory"
-        style={{
-          height: 36,
-          maxWidth: 200,
-          borderRadius: 8,
-          border: "1px solid var(--default-border-color, #ccc)",
-          background: "var(--island-bg-color, #fff)",
-          color: "inherit",
-          padding: "0 8px",
-          font: "inherit",
-        }}
-      >
-        {options.map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.name}
-          </option>
-        ))}
-      </select>
-      <button
-        title="New scene"
-        onClick={() => {
-          const name = prompt("New scene name:");
-          if (name && name.trim()) switchScene(name.trim(), { isNew: true });
-        }}
-        style={{
-          height: 36,
-          width: 36,
-          borderRadius: 8,
-          border: "1px solid var(--default-border-color, #ccc)",
-          background: "var(--island-bg-color, #fff)",
-          color: "inherit",
-          cursor: "pointer",
-          font: "inherit",
-        }}
-      >
-        +
-      </button>
-      <label
-        title="When on, this tab jumps to whatever scene Claude is drawing. Turn off to stay on the scene you picked."
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 4,
-          height: 36,
-          padding: "0 8px",
-          borderRadius: 8,
-          border: "1px solid var(--default-border-color, #ccc)",
-          background: "var(--island-bg-color, #fff)",
-          color: "inherit",
-          cursor: "pointer",
-          font: "inherit",
-          whiteSpace: "nowrap",
-        }}
-      >
-        <input
-          type="checkbox"
-          checked={follow}
-          onChange={(e) => setFollow(e.target.checked)}
-        />
-        Follow Claude
-      </label>
-    </div>
+  const newScene = () => {
+    const name = prompt("New scene name:");
+    if (name && name.trim()) switchScene(name.trim(), { isNew: true });
+  };
+
+  const rowStyle = (active: boolean): React.CSSProperties => ({
+    display: "block",
+    width: "100%",
+    textAlign: "left",
+    padding: "8px 10px",
+    borderRadius: 8,
+    border: "none",
+    cursor: "pointer",
+    font: "inherit",
+    fontSize: 14,
+    color: "inherit",
+    background: active ? "var(--color-primary-light, #e0dfff)" : "transparent",
+    fontWeight: active ? 600 : 400,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  });
+
+  // The "Scenes" sidebar, docked on the left like the Excalidraw dashboard.
+  const scenesSidebar = (
+    <Sidebar name="scenes" docked={docked} onDock={setDocked}>
+      <Sidebar.Header>
+        <div style={{ fontWeight: 600, fontSize: 16, padding: "0 4px", flex: 1 }}>Scenes</div>
+      </Sidebar.Header>
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, padding: 8, gap: 8 }}>
+        <button
+          onClick={newScene}
+          style={{
+            padding: "8px 10px",
+            borderRadius: 8,
+            border: "1px dashed var(--default-border-color, #ccc)",
+            background: "transparent",
+            color: "inherit",
+            cursor: "pointer",
+            font: "inherit",
+            fontSize: 14,
+          }}
+        >
+          + New scene
+        </button>
+        <div style={{ overflowY: "auto", flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+          {options.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => switchScene(s.id)}
+              title={s.name}
+              style={rowStyle(s.id === currentScene)}
+            >
+              {s.name}
+            </button>
+          ))}
+        </div>
+        <label
+          title="When on, this tab jumps to whatever scene Claude is drawing. Turn off to stay on the scene you picked."
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "8px 10px",
+            borderTop: "1px solid var(--default-border-color, #ccc)",
+            cursor: "pointer",
+            font: "inherit",
+            fontSize: 14,
+          }}
+        >
+          <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
+          Follow Claude
+        </label>
+      </div>
+    </Sidebar>
+  );
+
+  // Top-right button to reopen the sidebar if the user closes it.
+  const renderTopRight = () => (
+    <button
+      title="Scenes"
+      onClick={() => api?.toggleSidebar({ name: "scenes" })}
+      style={{
+        height: 36,
+        padding: "0 10px",
+        borderRadius: 8,
+        border: "1px solid var(--default-border-color, #ccc)",
+        background: "var(--island-bg-color, #fff)",
+        color: "inherit",
+        cursor: "pointer",
+        font: "inherit",
+      }}
+    >
+      Scenes
+    </button>
   );
 
   return (
-    <Excalidraw excalidrawAPI={setApi} onChange={onChange} renderTopRightUI={renderPicker} />
+    <Excalidraw
+      excalidrawAPI={setApi}
+      onChange={onChange}
+      initialData={{ appState: { openSidebar: { name: "scenes" } } }}
+      renderTopRightUI={renderTopRight}
+    >
+      {scenesSidebar}
+    </Excalidraw>
   );
 }
 

@@ -4,15 +4,15 @@ A [MCP](https://modelcontextprotocol.io) server that turns natural-language prom
 [Excalidraw](https://excalidraw.com) diagrams. You describe a diagram to Claude and the
 server generates valid `.excalidraw` JSON.
 
-It runs in one of two modes:
+It normally runs in **live mode**: point the server at the bundled **relay** and open the
+**companion web app** in your browser. Scenes Claude draws appear on the canvas instantly,
+you and Claude can co-edit the same drawing, and you can pick which saved scene to work on
+from the canvas. This is the intended setup — see [Live view](#live-view), usually run via
+[Docker](#docker-relay--web).
 
-- **File mode (default).** The server writes a `.excalidraw` file you open in your
-  (self-hosted, Dockerized) Excalidraw instance. Simple and robust — no changes to
-  Excalidraw, no collab protocol.
-- **Live mode.** Point the server at the bundled **relay** and open the **companion web
-  app** in your browser: scenes Claude draws appear on the canvas instantly, and edits you
-  make in the browser flow back so `read_scene` reflects them. See
-  [Live view](#live-view).
+If no relay is configured the server falls back to **file mode**: it just writes a
+`.excalidraw` file you open yourself — simple and robust, but with no live canvas and no
+co-editing.
 
 ## How it works
 
@@ -32,7 +32,7 @@ binding geometry) are recomputed by Excalidraw on import, so output stays valid.
 - **`list_scenes`** — lists generated files.
 - **`read_scene`** — `{ filename }` → returns the scene's raw JSON.
 
-`add_elements` / `update_element` / `delete_element` apply id-keyed merge ops rather than replacing the scene, so Claude and the browser can co-edit the same drawing. With a relay configured these go to `POST /scene/:id/ops`; in file-only mode the same merge is applied to the `.excalidraw` file.
+`add_elements` / `update_element` / `delete_element` apply id-keyed merge ops rather than replacing the scene, so Claude and the browser can co-edit the same drawing. These go to the relay via `POST /scene/:id/ops`; in the file-mode fallback the same merge is applied directly to the `.excalidraw` file.
 
 The `filename` argument is **optional** on every scene tool: omit it and the tool acts on whatever scene the browser currently has open. The relay tracks this (the browser is the source of truth, via `GET /current`), so opening a scene with the picker is enough for Claude to work on "the current scene" — no need to name it.
 
@@ -62,9 +62,12 @@ npm run build
 
 ## Register with Claude Code
 
+Start the relay first (see [Live view](#live-view), or [Docker](#docker-relay--web) for the
+usual path), then register the server pointing at it with `EXCALIDRAW_RELAY_URL`:
+
 ```bash
 claude mcp add excalidraw \
-  --env EXCALIDRAW_OUTPUT_DIR=/path/to/your/scenes \
+  --env EXCALIDRAW_RELAY_URL=http://localhost:3030 \
   -- node /absolute/path/to/excalidraw-mcp/dist/index.js
 ```
 
@@ -76,15 +79,17 @@ Or in an MCP JSON config:
     "excalidraw": {
       "command": "node",
       "args": ["/absolute/path/to/excalidraw-mcp/dist/index.js"],
-      "env": { "EXCALIDRAW_OUTPUT_DIR": "/path/to/your/scenes" }
+      "env": { "EXCALIDRAW_RELAY_URL": "http://localhost:3030" }
     }
   }
 }
 ```
 
-`EXCALIDRAW_OUTPUT_DIR` defaults to `./scenes` relative to the server's working
-directory. Point it at a host folder you can reach — ideally one you've mounted into
-your Excalidraw Docker container, or just a local folder you open files from.
+**File-mode fallback:** omit `EXCALIDRAW_RELAY_URL` and the server writes `.excalidraw`
+files to `EXCALIDRAW_OUTPUT_DIR` (default `./scenes`) that you open yourself — no live
+canvas. In this mode point `EXCALIDRAW_OUTPUT_DIR` at a folder you can reach (e.g. one
+mounted into your Excalidraw container). In live mode the relay owns the output directory,
+so the MCP server doesn't need it.
 
 ## Live view
 
@@ -185,4 +190,5 @@ per session) — it is never a long-running container.
 > "Draw a login flow: a 'User' box, an arrow to an 'Auth Service' box, an arrow to a
 > 'Database' box, and a dashed arrow back from Database to User labeled 'token'."
 
-Claude calls `create_scene` with the shapes; you open the resulting file in Excalidraw.
+Claude calls `create_scene` and the diagram appears live on your open canvas (or, in the
+file-mode fallback, is written as a `.excalidraw` file you open yourself).
