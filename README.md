@@ -192,3 +192,7 @@ per session) — it is never a long-running container.
 
 Claude calls `create_scene` and the diagram appears live on your open canvas (or, in the
 file-mode fallback, is written as a `.excalidraw` file you open yourself).
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).
