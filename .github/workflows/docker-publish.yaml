@@ -92,6 +92,13 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version from package.json
+        id: pkg
+        run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
+
       - name: Download digests
         uses: actions/download-artifact@v4
         with:
@@ -108,6 +115,7 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
+            type=raw,value=${{ steps.pkg.outputs.version }}
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -129,3 +137,14 @@ jobs:
 
       - name: Inspect pushed image
         run: docker buildx imagetools inspect "${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}"
+
+      - name: Publish overview to Docker Hub
+        # Only on main — syncs DOCKERHUB.md to the repo's Docker Hub overview page.
+        if: github.ref == 'refs/heads/main'
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ env.IMAGE_NAME }}
+          short-description: "Live-view relay for the excalidraw-mcp server (amd64/arm64)."
+          readme-filepath: ./DOCKERHUB.md
