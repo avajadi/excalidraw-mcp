@@ -15,5 +15,5 @@ npm-debug.log*
 # Docker files themselves don't belong in the build context payload.
 Dockerfile
 .dockerignore
-docker-compose.yml
+docker-compose.yaml
 README.md
