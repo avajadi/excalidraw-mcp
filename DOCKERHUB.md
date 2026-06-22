@@ -4,9 +4,34 @@ The live-view **relay** for [excalidraw-mcp](https://github.com/avajadi/excalidr
 [MCP](https://modelcontextprotocol.io) server that turns natural-language prompts into
 [Excalidraw](https://excalidraw.com) diagrams.
 
-This image is the long-lived service: it serves the companion web canvas and bridges scene
-updates over WebSocket. The MCP server itself is **not** in this image — Claude spawns it on
-the host over stdio and points it at this relay.
+This image ships **two roles** from one binary set:
+
+- `relay` (default) — the long-lived service that serves the companion web canvas and bridges
+  scene updates over WebSocket. This is what you run as a persistent container.
+- `mcp` — the stdio MCP server Claude spawns per session. It connects to the relay so you can
+  run it in Docker too, instead of on the host.
+
+## Getting started
+
+Two steps, no Node on the host. Grab the
+[`docker-compose.yaml`](https://github.com/avajadi/excalidraw-mcp/blob/main/docker-compose.yaml)
+and start the persistent relay (it serves the live canvas at `localhost:3030` and survives
+across sessions):
+
+```bash
+docker compose up -d
+```
+
+Then register the MCP — the same image, run per session over stdio — with Claude:
+
+```bash
+claude mcp add excalidraw -- \
+  docker run -i --rm --network excalidraw \
+  -e EXCALIDRAW_RELAY_URL=http://relay:3030 \
+  avajadi/excalidraw-mcp-relay mcp
+```
+
+Open <http://localhost:3030/> and ask Claude to draw — the diagram appears live on the canvas.
 
 ## Supported tags
 
@@ -68,7 +93,19 @@ volumes:
 
 ## Connecting the MCP server
 
-Run the host-side MCP server and point it at this container:
+Run the MCP straight from this image (no Node on the host). With the relay started via
+`docker compose up -d` (it joins the `excalidraw` network), register the `mcp` role:
+
+```bash
+claude mcp add excalidraw -- \
+  docker run -i --rm --network excalidraw \
+  -e EXCALIDRAW_RELAY_URL=http://relay:3030 \
+  avajadi/excalidraw-mcp-relay mcp
+```
+
+`--network excalidraw` joins the relay's network; `relay:3030` is the relay container's
+hostname on it. The MCP container is throwaway (one per session); the relay stays alive and
+keeps your canvas. Prefer running the MCP on the host instead? Point it at the published port:
 
 ```bash
 claude mcp add excalidraw \

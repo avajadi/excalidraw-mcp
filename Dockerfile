@@ -31,16 +31,21 @@ ENV NODE_ENV=production \
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
-# Compiled relay + the web bundle it serves from ../web/dist.
+# Compiled relay + MCP (both in dist/) plus the web bundle served from ../web/dist.
 COPY --from=server-build /app/dist ./dist
 COPY --from=web-build /app/web/dist ./web/dist
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Scenes persist here; mount a volume to keep them across restarts.
 RUN mkdir -p /data
 VOLUME ["/data"]
 
 EXPOSE 3030
+# Healthcheck only makes sense for the relay role; the stdio MCP has no HTTP port.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -qO- "http://127.0.0.1:${RELAY_PORT}/scenes" >/dev/null 2>&1 || exit 1
 
-CMD ["node", "dist/relay.js"]
+# Default role is the relay; `mcp` selects the stdio MCP server (see entrypoint).
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["relay"]

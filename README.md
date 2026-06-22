@@ -14,6 +14,28 @@ If no relay is configured the server falls back to **file mode**: it just writes
 `.excalidraw` file you open yourself — simple and robust, but with no live canvas and no
 co-editing.
 
+## Getting started
+
+The published image ([`avajadi/excalidraw-mcp-relay`](https://hub.docker.com/r/avajadi/excalidraw-mcp-relay))
+runs both roles, so the whole setup is two steps and no Node on the host. First start the
+persistent relay with the [`docker-compose.yaml`](docker-compose.yaml) in this repo (it serves
+the live canvas at `localhost:3030` and survives across sessions):
+
+```bash
+docker compose up -d
+```
+
+Then register the MCP — the same image, run per session over stdio — with Claude:
+
+```bash
+claude mcp add excalidraw -- \
+  docker run -i --rm --network excalidraw \
+  -e EXCALIDRAW_RELAY_URL=http://relay:3030 \
+  avajadi/excalidraw-mcp-relay mcp
+```
+
+Open `http://localhost:3030/` and ask Claude to draw — the diagram appears live on the canvas.
+
 ## How it works
 
 Excalidraw scenes are JSON arrays of `elements` (rectangles, ellipses, arrows, text…).
@@ -178,12 +200,25 @@ the relay beyond localhost, put an authenticating TLS proxy in front of it.
 To verify the container is up: `curl localhost:3030/scenes` returns a JSON list (`[]` when
 empty); `docker compose logs -f relay` shows the startup line and the output dir.
 
-#### Running the MCP in Docker too (optional)
+#### Running the MCP in Docker too (no Node on the host)
 
-If you'd rather not run Node on the host, the same repo can run the MCP as a per-session
-container. Add it to Claude as a `docker run -i` command on the same network as the relay,
-with `EXCALIDRAW_RELAY_URL` pointing at the relay service. It stays ephemeral (one process
-per session) — it is never a long-running container.
+The published image ships **both** roles: `relay` (the default) and `mcp`. So if you'd rather
+not run Node on the host, you don't need a second image — register the same image as the MCP
+with the `mcp` argument. It runs per-session over stdio and connects to the long-lived relay
+container; the relay (and your live canvas) keeps running between sessions.
+
+With the relay started via `docker compose up -d` (it joins the `excalidraw` network):
+
+```bash
+claude mcp add excalidraw -- \
+  docker run -i --rm --network excalidraw \
+  -e EXCALIDRAW_RELAY_URL=http://relay:3030 \
+  avajadi/excalidraw-mcp-relay mcp
+```
+
+`--network excalidraw` joins the relay's network; `relay:3030` is the relay container's
+hostname on it. The MCP container is throwaway (one per session); the relay is the persistent
+one that keeps your canvas alive.
 
 ## Example prompt
 

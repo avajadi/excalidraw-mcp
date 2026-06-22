@@ -14,7 +14,17 @@ services:
       EXCALIDRAW_OUTPUT_DIR: /data
     volumes:
       - excalidraw-scenes:/data
+    networks:
+      - excalidraw
     restart: unless-stopped
 
 volumes:
   excalidraw-scenes:
+
+# Named so the MCP container can join it and reach the relay as http://relay:3030:
+#   docker run -i --rm --network excalidraw \
+#     -e EXCALIDRAW_RELAY_URL=http://relay:3030 \
+#     avajadi/excalidraw-mcp-relay mcp
+networks:
+  excalidraw:
+    name: excalidraw
