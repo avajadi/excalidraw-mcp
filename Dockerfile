@@ -5,7 +5,7 @@
 # host (Claude spawns it over stdio) and only needs to reach this container.
 
 # ---- Stage 1: compile the relay (TypeScript -> dist/) ----------------------
-FROM node:20-alpine AS server-build
+FROM node:24-alpine AS server-build
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.json ./
 RUN npm ci
@@ -13,7 +13,7 @@ COPY src ./src
 RUN npm run build
 
 # ---- Stage 2: build the companion web app (Vite -> web/dist/) --------------
-FROM node:20-alpine AS web-build
+FROM node:24-alpine AS web-build
 WORKDIR /app/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
@@ -21,7 +21,7 @@ COPY web/ ./
 RUN npm run build
 
 # ---- Stage 3: runtime ------------------------------------------------------
-FROM node:20-alpine AS runtime
+FROM node:24-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
     RELAY_PORT=3030 \
