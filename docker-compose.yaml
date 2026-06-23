@@ -12,6 +12,10 @@ services:
     environment:
       RELAY_PORT: "3030"
       EXCALIDRAW_OUTPUT_DIR: /data
+      # If you bind-mount a host directory below, set this to that host path so the
+      # relay can report host-absolute file paths (e.g. for export_scene). A
+      # container can't discover its own bind-mount source, so it must be told.
+      #   EXCALIDRAW_HOST_DIR: /home/you/excalidraw/scenes
     volumes:
       # Default: a Docker-managed named volume (declared under top-level `volumes:`).
       - excalidraw-scenes:/data
@@ -19,7 +23,8 @@ services:
       # bind mount here (host:container) — do NOT put the host path under the
       # top-level `volumes:` block, that only takes a name + driver opts:
       #   - /home/you/excalidraw/scenes:/data
-      # and add `user: "1000:1000"` (your uid:gid) so the files stay yours.
+      # and add `user: "1000:1000"` (your uid:gid) so the files stay yours, and set
+      # EXCALIDRAW_HOST_DIR above to the same host path.
     networks:
       - excalidraw
     restart: unless-stopped

@@ -130,7 +130,12 @@ function App() {
 
     // Render the scene this tab currently shows and ship it back to the relay,
     // reusing Excalidraw's own exporters (the same path as the Export image menu).
-    const handleExport = async (req: { requestId: string; format?: string; scale?: number }) => {
+    const handleExport = async (req: {
+      requestId: string;
+      format?: string;
+      scale?: number;
+      background?: boolean;
+    }) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
       try {
@@ -138,7 +143,7 @@ function App() {
         const files = api.getFiles();
         const exportAppState = {
           ...api.getAppState(),
-          exportBackground: true,
+          exportBackground: req.background ?? true,
           viewBackgroundColor: bgRef.current,
           exportScale: req.scale ?? 1,
         };

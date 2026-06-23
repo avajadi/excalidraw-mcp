@@ -61,6 +61,30 @@ async function pushOps(id: string, ops: Op[]): Promise<void> {
   await fs.writeFile(resolveScenePath(id), JSON.stringify(merged, null, 2), "utf8");
 }
 
+// The relay knows where its output dir lives on the host (via EXCALIDRAW_HOST_DIR);
+// fetched once and cached so tools can report file paths the user can actually open.
+let hostDirCache: string | null | undefined; // undefined = not fetched yet
+
+/** Host-filesystem directory where the relay writes scenes/exports, or null. */
+async function relayHostDir(): Promise<string | null> {
+  if (!RELAY_URL) return null;
+  if (hostDirCache !== undefined) return hostDirCache;
+  try {
+    const res = await fetch(`${RELAY_URL}/hostdir`);
+    hostDirCache = res.ok ? ((await res.json()) as { dir: string | null }).dir : null;
+  } catch {
+    hostDirCache = null;
+  }
+  return hostDirCache;
+}
+
+/** Absolute host path of a scene's `.excalidraw` file, or null if unknown. */
+async function hostScenePath(id: string): Promise<string | null> {
+  if (!RELAY_URL) return resolveScenePath(id);
+  const dir = await relayHostDir();
+  return dir ? `${dir.replace(/\/+$/, "")}/${id}` : null;
+}
+
 /** The scene the browser currently has loaded, or null if none / no relay. */
 async function currentSceneId(): Promise<string | null> {
   if (!RELAY_URL) return null;
@@ -90,10 +114,13 @@ async function resolveScene(filename?: string): Promise<string> {
 }
 
 /** Where a scene ended up, for messages back to the user. */
-function whereText(id: string): string {
-  return RELAY_URL
-    ? `An open tab follows automatically; otherwise open: ${liveUrl(id)}`
-    : `Wrote ${resolveScenePath(id)} — open it in Excalidraw to view/edit.`;
+async function whereText(id: string): Promise<string> {
+  if (!RELAY_URL) {
+    return `Wrote ${resolveScenePath(id)} — open it in Excalidraw to view/edit.`;
+  }
+  const host = await hostScenePath(id);
+  const fileNote = host ? ` File: ${host}` : "";
+  return `An open tab follows automatically; otherwise open: ${liveUrl(id)}.${fileNote}`;
 }
 
 const server = new McpServer({ name: "excalidraw", version: "1.0.0" });
@@ -143,7 +170,7 @@ server.tool(
       content: [
         {
           type: "text",
-          text: `Created scene '${id}' with ${scene.elements.length} element(s). ${whereText(id)}`,
+          text: `Created scene '${id}' with ${scene.elements.length} element(s). ${await whereText(id)}`,
         },
       ],
     };
@@ -175,7 +202,7 @@ server.tool(
       content: [
         {
           type: "text",
-          text: `Added ${created.length} element(s) to '${id}':\n${list}\n${whereText(id)}`,
+          text: `Added ${created.length} element(s) to '${id}':\n${list}\n${await whereText(id)}`,
         },
       ],
     };
@@ -201,7 +228,7 @@ server.tool(
     const ops = buildUpdateDelta(scene, id, patch);
     await pushOps(sid, ops);
     return {
-      content: [{ type: "text", text: `Updated '${id}' in '${sid}'. ${whereText(sid)}` }],
+      content: [{ type: "text", text: `Updated '${id}' in '${sid}'. ${await whereText(sid)}` }],
     };
   },
 );
@@ -225,7 +252,7 @@ server.tool(
     const removed = ops.filter((o) => o.type === "delete").length;
     return {
       content: [
-        { type: "text", text: `Deleted ${removed} element(s) from '${sid}'. ${whereText(sid)}` },
+        { type: "text", text: `Deleted ${removed} element(s) from '${sid}'. ${await whereText(sid)}` },
       ],
     };
   },
@@ -285,9 +312,27 @@ server.tool(
 
 server.tool(
   "list_scenes",
-  "List the .excalidraw files already generated in the output directory.",
+  "List the .excalidraw scenes that exist, with their file paths (host-absolute " +
+    "when the relay knows the host directory).",
   {},
   async () => {
+    // With a relay, the files live where the relay runs (possibly another host /
+    // container), so ask it for the list and report host paths it can resolve.
+    if (RELAY_URL) {
+      let list: Array<{ id: string; name: string }> = [];
+      try {
+        const res = await fetch(`${RELAY_URL}/scenes`);
+        if (res.ok) list = (await res.json()) as Array<{ id: string; name: string }>;
+      } catch {
+        // relay unreachable
+      }
+      const dir = await relayHostDir();
+      const text = list.length
+        ? list.map((s) => (dir ? `${dir.replace(/\/+$/, "")}/${s.id}` : s.id)).join("\n")
+        : "No scenes found.";
+      return { content: [{ type: "text", text }] };
+    }
+
     let files: string[] = [];
     try {
       files = (await fs.readdir(OUTPUT_DIR)).filter((f) => f.endsWith(".excalidraw"));
@@ -327,12 +372,14 @@ server.tool(
   {},
   async () => {
     const id = await currentSceneId();
+    const host = id ? await hostScenePath(id) : null;
     return {
       content: [
         {
           type: "text",
           text: id
-            ? `Current scene: ${id.replace(/\.excalidraw$/, "")} (${id})`
+            ? `Current scene: ${id.replace(/\.excalidraw$/, "")} (${id})` +
+              (host ? `\nFile: ${host}` : "")
             : RELAY_URL
               ? "No scene is currently loaded in the browser."
               : "No relay is configured, so there is no 'current scene'. Pass filenames explicitly.",
@@ -358,8 +405,15 @@ server.tool(
       .number()
       .optional()
       .describe("PNG resolution multiplier (1–3). Default 1; ignored for SVG."),
+    background: z
+      .boolean()
+      .optional()
+      .describe(
+        "Include the canvas background. Default true; set false for a transparent " +
+          "PNG / no background rectangle in the SVG.",
+      ),
   },
-  async ({ filename, format, scale }) => {
+  async ({ filename, format, scale, background }) => {
     if (!RELAY_URL) {
       throw new Error(
         "export_scene needs a relay (the browser does the rendering); none is configured.",
@@ -369,7 +423,7 @@ server.tool(
     const res = await fetch(`${RELAY_URL}/scene/${encodeURIComponent(id)}/export`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ format: format ?? "png", scale }),
+      body: JSON.stringify({ format: format ?? "png", scale, background }),
     });
     if (!res.ok) {
       throw new Error(`Export failed (${res.status}): ${await res.text()}`);

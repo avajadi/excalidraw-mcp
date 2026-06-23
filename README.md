@@ -53,7 +53,7 @@ binding geometry) are recomputed by Excalidraw on import, so output stays valid.
 - **`current_scene`** — `{}` → reports which scene the user has open in the browser (set by the scene picker or by following Claude's drawing).
 - **`list_scenes`** — lists generated files.
 - **`read_scene`** — `{ filename }` → returns the scene's raw JSON.
-- **`export_scene`** — `{ filename, format?, scale? }` → renders the scene to **PNG or SVG** using the browser's own exporter (the same path as Excalidraw's "Export image" menu), writes it next to the `.excalidraw` file, and returns the image. Requires the relay **and** an open browser tab viewing the scene.
+- **`export_scene`** — `{ filename, format?, scale?, background? }` → renders the scene to **PNG or SVG** using the browser's own exporter (the same path as Excalidraw's "Export image" menu), writes it next to the `.excalidraw` file, and returns the image. `background` (default `true`) toggles the canvas background — set it `false` for a transparent PNG / no background rectangle in the SVG. Requires the relay **and** an open browser tab viewing the scene.
 
 `add_elements` / `update_element` / `delete_element` apply id-keyed merge ops rather than replacing the scene, so Claude and the browser can co-edit the same drawing. These go to the relay via `POST /scene/:id/ops`; in the file-mode fallback the same merge is applied directly to the `.excalidraw` file.
 
@@ -165,6 +165,12 @@ Move shapes in the browser and `read_scene` returns the updated geometry.
 Relay env vars: `RELAY_PORT` (default `3030`) and `EXCALIDRAW_OUTPUT_DIR` (where scenes are
 persisted). In relay mode the MCP server talks to the relay over HTTP and never writes
 files itself, so only the relay needs the output directory.
+
+Set `EXCALIDRAW_HOST_DIR` on the relay to the host path that `EXCALIDRAW_OUTPUT_DIR` is
+mounted from (only meaningful when the relay runs in a container — it can't discover its
+own bind-mount source). The relay then reports **host-absolute** file paths back to the
+MCP, so `export_scene`, `list_scenes`, `current_scene`, and the create/add/update tools
+tell you the real path you can open on the host instead of the in-container `/data` path.
 
 ### Docker (relay + web)
 

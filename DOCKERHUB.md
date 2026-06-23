@@ -28,7 +28,7 @@ Then register the MCP — the same image, run per session over stdio — with Cl
 claude mcp add excalidraw -- \
   docker run -i --rm --network excalidraw \
   -e EXCALIDRAW_RELAY_URL=http://relay:3030 \
-  avajadi/excalidraw-mcp-relay:1.2.0 mcp
+  avajadi/excalidraw-mcp-relay:1.3.0 mcp
 ```
 
 Open <http://localhost:3030/> and ask Claude to draw — the diagram appears live on the canvas.
@@ -36,9 +36,10 @@ Open <http://localhost:3030/> and ask Claude to draw — the diagram appears liv
 ## Supported tags
 
 - `latest` — newest build from `main`
-- `X.Y.Z` — the `package.json` version (e.g. `1.0.0`)
-- `X.Y` / `X.Y.Z` from `v*` git tags (semver)
+- `X.Y.Z` — the `package.json` version (e.g. `1.3.0`), tagged on every `main` push
+- `main` — the latest `main` build
 - `sha-<commit>` — a specific commit
+- `X.Y` / `X.Y.Z` semver — only produced when a `v*` git tag is pushed (none yet)
 
 ## Supported architectures
 
@@ -82,11 +83,12 @@ volumes:
 
 ## Configuration
 
-| Variable                | Default | Description                                        |
-| ----------------------- | ------- | -------------------------------------------------- |
-| `RELAY_PORT`            | `3030`  | Port the relay listens on (also the exposed port). |
-| `EXCALIDRAW_OUTPUT_DIR` | `/data` | Where scenes and exported PNG/SVG images are written. |
-| `NODE_ENV`              | `production` | Node runtime mode.                            |
+| Variable                | Default      | Description                                                                                                                                                          |
+| ----------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RELAY_PORT`            | `3030`       | Port the relay listens on (also the exposed port).                                                                                                                  |
+| `EXCALIDRAW_OUTPUT_DIR` | `/data`      | Where scenes and exported PNG/SVG images are written.                                                                                                               |
+| `EXCALIDRAW_HOST_DIR`   | _(unset)_    | Host path that `/data` is mounted from. Set it to make the relay report host-absolute file paths to the MCP (a container can't discover its own bind-mount source). |
+| `NODE_ENV`              | `production` | Node runtime mode.                                                                                                                                                 |
 
 - **Volume:** `/data` holds saved scenes and any images exported via `export_scene` — mount a named volume to keep them across restarts.
 - **Healthcheck:** built in; polls `GET /scenes` and reports `healthy` once the relay responds.

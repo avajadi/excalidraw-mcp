@@ -23,6 +23,20 @@ import { applyOps, emptyScene, type Op, type Scene } from "./scene.js";
 const PORT = Number(process.env.RELAY_PORT ?? 3030);
 const WEB_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "web", "dist");
 
+/**
+ * Where OUTPUT_DIR is mounted on the host. A container can't discover its own
+ * bind-mount source, so when the relay runs in Docker this must be supplied
+ * (e.g. EXCALIDRAW_HOST_DIR=/home/me/Pictures/excalidraw/scenes) for the relay
+ * to report host-absolute file paths back to the MCP. Unset → report the path
+ * as the relay sees it (the in-container /data path, or the real path on host).
+ */
+const HOST_DIR = process.env.EXCALIDRAW_HOST_DIR?.replace(/\/+$/, "");
+
+/** Translate an OUTPUT_DIR path to its host-filesystem equivalent (see HOST_DIR). */
+function hostPath(internal: string): string {
+  return HOST_DIR ? path.join(HOST_DIR, path.relative(OUTPUT_DIR, internal)) : internal;
+}
+
 /** Current scene JSON per id. */
 const scenes = new Map<string, Scene>();
 /** Every open browser socket → the scene id it is currently viewing. */
@@ -69,8 +83,7 @@ function socketViewing(id: string): WebSocket | null {
 function requestExport(
   ws: WebSocket,
   id: string,
-  format: "png" | "svg",
-  scale?: number,
+  opts: { format: "png" | "svg"; scale?: number; background?: boolean },
 ): Promise<ExportResult> {
   const requestId = randomUUID();
   return new Promise<ExportResult>((resolve, reject) => {
@@ -79,7 +92,7 @@ function requestExport(
       reject(new Error("Browser export timed out (is the tab still open?)"));
     }, EXPORT_TIMEOUT_MS);
     pendingExports.set(requestId, { resolve, reject, timer });
-    ws.send(JSON.stringify({ type: "export", id, format, scale, requestId }));
+    ws.send(JSON.stringify({ type: "export", id, requestId, ...opts }));
   });
 }
 
@@ -239,9 +252,10 @@ const server = http.createServer(async (req, res) => {
     // image menu), write the result next to the .excalidraw backup, and return it.
     if (exportMatch && req.method === "POST") {
       const id = sceneId(decodeURIComponent(exportMatch[1]));
-      const { format = "png", scale } = JSON.parse(await readBody(req)) as {
+      const { format = "png", scale, background = true } = JSON.parse(await readBody(req)) as {
         format?: "png" | "svg";
         scale?: number;
+        background?: boolean;
       };
       const target = socketViewing(id);
       if (!target) {
@@ -253,7 +267,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       try {
-        const result = await requestExport(target, id, format, scale);
+        const result = await requestExport(target, id, { format, scale, background });
         const outPath = resolveScenePath(id).replace(/\.excalidraw$/, `.${result.format}`);
         const buf =
           result.encoding === "base64"
@@ -261,7 +275,7 @@ const server = http.createServer(async (req, res) => {
             : Buffer.from(result.data, "utf8");
         await fs.mkdir(OUTPUT_DIR, { recursive: true });
         await fs.writeFile(outPath, buf);
-        sendJson(res, 200, { ok: true, ...result, path: outPath });
+        sendJson(res, 200, { ok: true, ...result, path: hostPath(outPath) });
       } catch (err) {
         sendJson(res, 504, { error: String(err) });
       }
@@ -277,6 +291,13 @@ const server = http.createServer(async (req, res) => {
     // The scene the browser currently has loaded, so the MCP can act on it.
     if (url.pathname === "/current" && req.method === "GET") {
       sendJson(res, 200, { id: currentSceneId });
+      return;
+    }
+
+    // The host-filesystem directory where scenes/exports land, so the MCP can
+    // report absolute paths the user can actually open (see HOST_DIR).
+    if (url.pathname === "/hostdir" && req.method === "GET") {
+      sendJson(res, 200, { dir: HOST_DIR ?? OUTPUT_DIR });
       return;
     }
 
@@ -379,5 +400,6 @@ wss.on("connection", async (ws, req) => {
 
 server.listen(PORT, () => {
   console.log(`excalidraw relay on http://localhost:${PORT}  (output dir: ${OUTPUT_DIR})`);
+  if (HOST_DIR) console.log(`Reporting host paths under: ${HOST_DIR}`);
   console.log(`Open a scene: http://localhost:${PORT}/?scene=<name>`);
 });

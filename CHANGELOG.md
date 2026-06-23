@@ -4,7 +4,26 @@ All notable changes to this project are documented here, newest first. The
 format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [1.2.0] - 2026-06-23
+## 1.3.0 - 2026-06-23
+
+### Added
+
+- `export_scene` gained a `background` option (default `true`) — set `false` for
+  a transparent PNG / no background rectangle in the SVG, matching the background
+  toggle in Excalidraw's Export image dialog.
+- Host-path reporting: set `EXCALIDRAW_HOST_DIR` on the relay (the host path its
+  output dir is mounted from) and it reports **host-absolute** file paths via a
+  new `GET /hostdir` endpoint. `export_scene`, `list_scenes`, `current_scene`,
+  and the create/add/update tools now surface the real path you can open on the
+  host instead of the in-container `/data` path.
+
+### Changed
+
+- `list_scenes` now sources its listing from the relay (via `GET /scenes`) when
+  one is configured, instead of reading the MCP server's own output dir — the
+  per-session MCP container never had the scenes mounted.
+
+## 1.2.0 - 2026-06-23
 
 ### Added
 
@@ -25,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Existing relays must be restarted and browser tabs reloaded to pick up the new
   WebSocket protocol.
 
-## [1.1.0] - 2026-06-22
+## 1.1.0 - 2026-06-22
 
 ### Added
 
@@ -33,13 +52,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (web canvas + WebSocket bridge, default) or the per-session `mcp` server over
   stdio, so the MCP can run in Docker instead of on the host.
 
-## [1.0.1] - 2026-06-22
+## 1.0.1 - 2026-06-22
 
 ### Changed
 
 - Updated the Node base image to the current LTS.
 
-## [1.0.0] - 2026-06-18
+## 1.0.0 - 2026-06-18
 
 ### Added
 
@@ -53,8 +72,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   so text no longer clips.
 - Docker packaging for the relay and a GitHub Actions workflow that publishes the
   image to Docker Hub.
-
-[1.2.0]: https://github.com/avajadi/excalidraw-mcp/releases/tag/v1.2.0
-[1.1.0]: https://github.com/avajadi/excalidraw-mcp/releases/tag/v1.1.0
-[1.0.1]: https://github.com/avajadi/excalidraw-mcp/releases/tag/v1.0.1
-[1.0.0]: https://github.com/avajadi/excalidraw-mcp/releases/tag/v1.0.0
