@@ -15,6 +15,7 @@ import * as http from "node:http";
 import { promises as fs, createReadStream } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { OUTPUT_DIR, sceneId, resolveScenePath } from "./paths.js";
 import { applyOps, emptyScene, type Op, type Scene } from "./scene.js";
@@ -33,6 +34,54 @@ const socketScene = new Map<WebSocket, string>();
  * not change it; the browser confirms what it is showing via a `viewing` message.
  */
 let currentSceneId: string | null = null;
+
+/**
+ * A rendered image returned by a browser tab — PNG comes back base64-encoded,
+ * SVG as the markup string.
+ */
+interface ExportResult {
+  format: "png" | "svg";
+  encoding: "base64" | "utf8";
+  data: string;
+}
+
+/**
+ * Image export is done by the browser (the only place with a canvas + fonts), so
+ * the relay asks a connected tab to render and waits for the reply. Each request
+ * is keyed by a random id the tab echoes back, so concurrent exports don't cross.
+ */
+const pendingExports = new Map<
+  string,
+  { resolve: (r: ExportResult) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
+>();
+
+const EXPORT_TIMEOUT_MS = 20000;
+
+/** First open socket currently viewing `id`, or null if no tab has it loaded. */
+function socketViewing(id: string): WebSocket | null {
+  for (const [ws, sid] of socketScene) {
+    if (sid === id && ws.readyState === WebSocket.OPEN) return ws;
+  }
+  return null;
+}
+
+/** Ask a browser tab to render `id` and resolve with the image it sends back. */
+function requestExport(
+  ws: WebSocket,
+  id: string,
+  format: "png" | "svg",
+  scale?: number,
+): Promise<ExportResult> {
+  const requestId = randomUUID();
+  return new Promise<ExportResult>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingExports.delete(requestId);
+      reject(new Error("Browser export timed out (is the tab still open?)"));
+    }, EXPORT_TIMEOUT_MS);
+    pendingExports.set(requestId, { resolve, reject, timer });
+    ws.send(JSON.stringify({ type: "export", id, format, scale, requestId }));
+  });
+}
 
 function broadcast(msg: unknown, accept: (ws: WebSocket) => boolean): void {
   const payload = JSON.stringify(msg);
@@ -167,6 +216,7 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     const opsMatch = url.pathname.match(/^\/scene\/(.+)\/ops$/);
+    const exportMatch = url.pathname.match(/^\/scene\/(.+)\/export$/);
     const sceneMatch = url.pathname.match(/^\/scene\/(.+)$/);
 
     // Incremental, non-destructive edits: apply id-keyed ops to the live scene
@@ -182,6 +232,39 @@ const server = http.createServer(async (req, res) => {
       const merged = applyOps(current, ops);
       await setScene(id, merged, { activate: activate ?? true });
       sendJson(res, 200, { ok: true, id, elements: merged.elements?.length ?? 0 });
+      return;
+    }
+
+    // Image export: have a browser tab render the scene (same path as the Export
+    // image menu), write the result next to the .excalidraw backup, and return it.
+    if (exportMatch && req.method === "POST") {
+      const id = sceneId(decodeURIComponent(exportMatch[1]));
+      const { format = "png", scale } = JSON.parse(await readBody(req)) as {
+        format?: "png" | "svg";
+        scale?: number;
+      };
+      const target = socketViewing(id);
+      if (!target) {
+        sendJson(res, 409, {
+          error:
+            `No browser tab is viewing '${id}'. Open ` +
+            `/?scene=${encodeURIComponent(id)} in the companion app and retry.`,
+        });
+        return;
+      }
+      try {
+        const result = await requestExport(target, id, format, scale);
+        const outPath = resolveScenePath(id).replace(/\.excalidraw$/, `.${result.format}`);
+        const buf =
+          result.encoding === "base64"
+            ? Buffer.from(result.data, "base64")
+            : Buffer.from(result.data, "utf8");
+        await fs.mkdir(OUTPUT_DIR, { recursive: true });
+        await fs.writeFile(outPath, buf);
+        sendJson(res, 200, { ok: true, ...result, path: outPath });
+      } catch (err) {
+        sendJson(res, 504, { error: String(err) });
+      }
       return;
     }
 
@@ -269,6 +352,21 @@ wss.on("connection", async (ws, req) => {
         id = sceneId(msg.id);
         socketScene.set(ws, id);
         currentSceneId = id;
+      } else if (msg.type === "exported" && msg.requestId) {
+        // A tab finished rendering an export we asked for.
+        const pending = pendingExports.get(msg.requestId);
+        if (pending) {
+          clearTimeout(pending.timer);
+          pendingExports.delete(msg.requestId);
+          pending.resolve({ format: msg.format, encoding: msg.encoding, data: msg.data });
+        }
+      } else if (msg.type === "exportError" && msg.requestId) {
+        const pending = pendingExports.get(msg.requestId);
+        if (pending) {
+          clearTimeout(pending.timer);
+          pendingExports.delete(msg.requestId);
+          pending.reject(new Error(String(msg.error)));
+        }
       }
     } catch (err) {
       console.error(`Bad message on scene ${id}:`, err);

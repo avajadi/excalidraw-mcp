@@ -342,6 +342,60 @@ server.tool(
   },
 );
 
+server.tool(
+  "export_scene",
+  "Export a scene to a PNG or SVG image using the live browser's renderer — the " +
+    "same path as Excalidraw's 'Export image' menu — routed through the relay. " +
+    "Requires a relay AND the scene to be open in a connected browser tab. Writes " +
+    "the image next to the .excalidraw file and returns it.",
+  {
+    filename: z
+      .string()
+      .optional()
+      .describe("Scene to export. Omit to use the scene open in the browser."),
+    format: z.enum(["png", "svg"]).optional().describe("Image format. Default 'png'."),
+    scale: z
+      .number()
+      .optional()
+      .describe("PNG resolution multiplier (1–3). Default 1; ignored for SVG."),
+  },
+  async ({ filename, format, scale }) => {
+    if (!RELAY_URL) {
+      throw new Error(
+        "export_scene needs a relay (the browser does the rendering); none is configured.",
+      );
+    }
+    const id = await resolveScene(filename);
+    const res = await fetch(`${RELAY_URL}/scene/${encodeURIComponent(id)}/export`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ format: format ?? "png", scale }),
+    });
+    if (!res.ok) {
+      throw new Error(`Export failed (${res.status}): ${await res.text()}`);
+    }
+    const result = (await res.json()) as {
+      format: "png" | "svg";
+      encoding: "base64" | "utf8";
+      data: string;
+      path: string;
+    };
+    if (result.format === "png") {
+      return {
+        content: [
+          { type: "image", data: result.data, mimeType: "image/png" },
+          { type: "text", text: `Exported '${id}' to PNG → ${result.path}` },
+        ],
+      };
+    }
+    return {
+      content: [
+        { type: "text", text: `Exported '${id}' to SVG → ${result.path}\n\n${result.data}` },
+      ],
+    };
+  },
+);
+
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);

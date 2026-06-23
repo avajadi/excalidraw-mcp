@@ -28,7 +28,7 @@ Then register the MCP — the same image, run per session over stdio — with Cl
 claude mcp add excalidraw -- \
   docker run -i --rm --network excalidraw \
   -e EXCALIDRAW_RELAY_URL=http://relay:3030 \
-  avajadi/excalidraw-mcp-relay mcp
+  avajadi/excalidraw-mcp-relay:1.2.0 mcp
 ```
 
 Open <http://localhost:3030/> and ask Claude to draw — the diagram appears live on the canvas.
@@ -85,10 +85,10 @@ volumes:
 | Variable                | Default | Description                                        |
 | ----------------------- | ------- | -------------------------------------------------- |
 | `RELAY_PORT`            | `3030`  | Port the relay listens on (also the exposed port). |
-| `EXCALIDRAW_OUTPUT_DIR` | `/data` | Where scenes are persisted.                        |
+| `EXCALIDRAW_OUTPUT_DIR` | `/data` | Where scenes and exported PNG/SVG images are written. |
 | `NODE_ENV`              | `production` | Node runtime mode.                            |
 
-- **Volume:** `/data` holds saved scenes — mount a named volume to keep them across restarts.
+- **Volume:** `/data` holds saved scenes and any images exported via `export_scene` — mount a named volume to keep them across restarts.
 - **Healthcheck:** built in; polls `GET /scenes` and reports `healthy` once the relay responds.
 
 ## Connecting the MCP server

@@ -4,6 +4,8 @@ import {
   Excalidraw,
   Sidebar,
   restoreElements,
+  exportToSvg,
+  exportToBlob,
   CaptureUpdateAction,
 } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
@@ -32,6 +34,16 @@ function toSceneId(name: string): string {
  *  not on selection/pointer moves, so we don't echo remote updates back. */
 function signature(elements: readonly ExcalidrawElement[]): string {
   return elements.map((e) => `${e.id}:${e.version}:${e.isDeleted ? 1 : 0}`).join(",");
+}
+
+/** Base64-encode bytes in chunks so a large PNG never overflows the call stack. */
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
 }
 
 interface SceneRef {
@@ -116,12 +128,66 @@ function App() {
     let alive = true;
     void fetchScenes();
 
+    // Render the scene this tab currently shows and ship it back to the relay,
+    // reusing Excalidraw's own exporters (the same path as the Export image menu).
+    const handleExport = async (req: { requestId: string; format?: string; scale?: number }) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      try {
+        const elements = api.getSceneElements();
+        const files = api.getFiles();
+        const exportAppState = {
+          ...api.getAppState(),
+          exportBackground: true,
+          viewBackgroundColor: bgRef.current,
+          exportScale: req.scale ?? 1,
+        };
+        if (req.format === "svg") {
+          const svg = await exportToSvg({ elements, appState: exportAppState, files });
+          ws.send(
+            JSON.stringify({
+              type: "exported",
+              requestId: req.requestId,
+              format: "svg",
+              encoding: "utf8",
+              data: svg.outerHTML,
+            }),
+          );
+        } else {
+          const blob = await exportToBlob({
+            elements,
+            appState: exportAppState,
+            files,
+            mimeType: "image/png",
+          });
+          const bytes = new Uint8Array(await blob.arrayBuffer());
+          ws.send(
+            JSON.stringify({
+              type: "exported",
+              requestId: req.requestId,
+              format: "png",
+              encoding: "base64",
+              data: toBase64(bytes),
+            }),
+          );
+        }
+      } catch (err) {
+        ws.send(
+          JSON.stringify({ type: "exportError", requestId: req.requestId, error: String(err) }),
+        );
+      }
+    };
+
     const connect = () => {
       const ws = new WebSocket(WS_URL);
       wsRef.current = ws;
       ws.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data);
+          if (msg.type === "export" && msg.requestId) {
+            void handleExport(msg);
+            return;
+          }
           if (msg.type !== "scene" || !msg.scene) return;
 
           // The relay activates a scene on every tab when Claude draws it.

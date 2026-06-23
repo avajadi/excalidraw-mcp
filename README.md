@@ -53,8 +53,11 @@ binding geometry) are recomputed by Excalidraw on import, so output stays valid.
 - **`current_scene`** — `{}` → reports which scene the user has open in the browser (set by the scene picker or by following Claude's drawing).
 - **`list_scenes`** — lists generated files.
 - **`read_scene`** — `{ filename }` → returns the scene's raw JSON.
+- **`export_scene`** — `{ filename, format?, scale? }` → renders the scene to **PNG or SVG** using the browser's own exporter (the same path as Excalidraw's "Export image" menu), writes it next to the `.excalidraw` file, and returns the image. Requires the relay **and** an open browser tab viewing the scene.
 
 `add_elements` / `update_element` / `delete_element` apply id-keyed merge ops rather than replacing the scene, so Claude and the browser can co-edit the same drawing. These go to the relay via `POST /scene/:id/ops`; in the file-mode fallback the same merge is applied directly to the `.excalidraw` file.
+
+`export_scene` works differently: image rendering needs a canvas and fonts, which only exist in the browser. The relay asks a connected tab (via `POST /scene/:id/export`) to render the scene and POST the bytes back over the WebSocket, then writes the `.png`/`.svg` into the output dir. With no relay, or no tab viewing the scene, the export fails with a message telling you to open it.
 
 The `filename` argument is **optional** on every scene tool: omit it and the tool acts on whatever scene the browser currently has open. The relay tracks this (the browser is the source of truth, via `GET /current`), so opening a scene with the picker is enough for Claude to work on "the current scene" — no need to name it.
 
