@@ -29,7 +29,7 @@ Then register the MCP — the same image, run per session over stdio — with Cl
 
 ```bash
 claude mcp add excalidraw -- \
-  docker run -i --rm --network excalidraw \
+  docker run -i --rm --no-healthcheck --network excalidraw \
   -e EXCALIDRAW_RELAY_URL=http://relay:3030 \
   avajadi/excalidraw-mcp-relay mcp
 ```
@@ -220,7 +220,7 @@ With the relay started via `docker compose up -d` (it joins the `excalidraw` net
 
 ```bash
 claude mcp add excalidraw -- \
-  docker run -i --rm --network excalidraw \
+  docker run -i --rm --no-healthcheck --network excalidraw \
   -e EXCALIDRAW_RELAY_URL=http://relay:3030 \
   avajadi/excalidraw-mcp-relay mcp
 ```

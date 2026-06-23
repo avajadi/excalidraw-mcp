@@ -26,10 +26,13 @@ Then register the MCP — the same image, run per session over stdio — with Cl
 
 ```bash
 claude mcp add excalidraw -- \
-  docker run -i --rm --network excalidraw \
+  docker run -i --rm --no-healthcheck --network excalidraw \
   -e EXCALIDRAW_RELAY_URL=http://relay:3030 \
-  avajadi/excalidraw-mcp-relay:1.3.0 mcp
+  avajadi/excalidraw-mcp-relay:1.3.1 mcp
 ```
+
+`--no-healthcheck` is for the stdio `mcp` role: it has no HTTP port, so the image's
+relay healthcheck would otherwise mark a perfectly working container "unhealthy".
 
 Open <http://localhost:3030/> and ask Claude to draw — the diagram appears live on the canvas.
 
@@ -93,6 +96,47 @@ volumes:
 - **Volume:** `/data` holds saved scenes and any images exported via `export_scene` — mount a named volume to keep them across restarts.
 - **Healthcheck:** built in; polls `GET /scenes` and reports `healthy` once the relay responds.
 
+## Host file paths (`EXCALIDRAW_HOST_DIR`)
+
+By default the relay only knows its in-container path (`/data`), so the paths it reports to
+the MCP — e.g. where `export_scene` saved a PNG — look like `/data/diagram.png`, which you
+can't open from the host. To get **host-absolute** paths, bind-mount a host directory **and**
+set `EXCALIDRAW_HOST_DIR` to that same host path (a container can't discover its own
+bind-mount source, so you must tell it):
+
+```bash
+docker run -d \
+  --name excalidraw-relay \
+  -p 127.0.0.1:3030:3030 \
+  --user "1000:1000" \
+  -v /home/you/excalidraw/scenes:/data \
+  -e EXCALIDRAW_HOST_DIR=/home/you/excalidraw/scenes \
+  avajadi/excalidraw-mcp-relay:latest
+```
+
+Or in `docker-compose.yaml`:
+
+```yaml
+services:
+  relay:
+    image: avajadi/excalidraw-mcp-relay:latest
+    container_name: excalidraw-relay
+    user: "1000:1000"            # your uid:gid, so files stay yours
+    ports:
+      - "127.0.0.1:3030:3030"
+    environment:
+      RELAY_PORT: "3030"
+      EXCALIDRAW_OUTPUT_DIR: /data
+      EXCALIDRAW_HOST_DIR: /home/you/excalidraw/scenes  # == the host side of the mount
+    volumes:
+      - /home/you/excalidraw/scenes:/data
+    restart: unless-stopped
+```
+
+Now `export_scene`, `list_scenes`, and `current_scene` report paths like
+`/home/you/excalidraw/scenes/diagram.png`. Leave `EXCALIDRAW_HOST_DIR` unset (e.g. with a
+named volume) and the relay falls back to the `/data` path.
+
 ## Connecting the MCP server
 
 Run the MCP straight from this image (no Node on the host). With the relay started via
@@ -100,7 +144,7 @@ Run the MCP straight from this image (no Node on the host). With the relay start
 
 ```bash
 claude mcp add excalidraw -- \
-  docker run -i --rm --network excalidraw \
+  docker run -i --rm --no-healthcheck --network excalidraw \
   -e EXCALIDRAW_RELAY_URL=http://relay:3030 \
   avajadi/excalidraw-mcp-relay mcp
 ```

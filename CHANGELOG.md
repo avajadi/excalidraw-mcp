@@ -4,6 +4,17 @@ All notable changes to this project are documented here, newest first. The
 format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## 1.3.1 - 2026-06-23
+
+### Fixed
+
+- The `mcp` (stdio) role no longer reports Docker health as **unhealthy**. The
+  image healthcheck probes the relay's HTTP port, which the mcp role doesn't
+  serve, so a working mcp container was always marked unhealthy. The entrypoint
+  now records its role and the healthcheck reports the mcp role healthy as soon
+  as it is running. The documented `docker run` for the mcp role also passes
+  `--no-healthcheck`, which fixes it on already-published images too.
+
 ## 1.3.0 - 2026-06-23
 
 ### Added
