@@ -1,5 +1,3 @@
-# excalidraw-mcp
-
 A [MCP](https://modelcontextprotocol.io) server that turns natural-language prompts into
 [Excalidraw](https://excalidraw.com) diagrams. You describe a diagram to Claude and the
 server generates valid `.excalidraw` JSON.
@@ -13,6 +11,9 @@ from the canvas. This is the intended setup — see [Live view](#live-view), usu
 If no relay is configured the server falls back to **file mode**: it just writes a
 `.excalidraw` file you open yourself — simple and robust, but with no live canvas and no
 co-editing.
+
+For how to drive it once it's running — drawing, describing the live canvas, and exporting
+— see the [user manual](MANUAL.md).
 
 ## Getting started
 
