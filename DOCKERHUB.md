@@ -41,7 +41,7 @@ claude mcp add excalidraw \
 ## Supported tags
 
 - `latest` — newest build from `main`
-- `X.Y.Z` — the `package.json` version (e.g. `2.0.0-rc1`), tagged on every `main` push
+- `X.Y.Z` — the `package.json` version (e.g. `2.0.0`), tagged on every `main` push
 - `main` — the latest `main` build
 - `sha-<commit>` — a specific commit
 - `X.Y` / `X.Y.Z` semver — only produced when a `v*` git tag is pushed (none yet)
@@ -180,6 +180,13 @@ and it falls back to the `/data` path — correct inside the container, just not
 open directly from the host shell. (The live `.excalidraw` scene itself is never read from or
 written to by the MCP client directly, in either case — every scene edit goes through the MCP
 tools, which talk to the relay over HTTP.)
+
+## Bug reports & feature requests
+
+Found a bug, or have an idea for something this should do? Open an issue on the
+[GitHub issues page](https://github.com/avajadi/excalidraw-mcp/issues) —
+[report a bug](https://github.com/avajadi/excalidraw-mcp/issues/new?labels=bug) or
+[request a feature](https://github.com/avajadi/excalidraw-mcp/issues/new?labels=enhancement).
 
 ## License
 

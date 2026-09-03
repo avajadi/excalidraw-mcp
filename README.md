@@ -226,6 +226,13 @@ empty); `docker compose logs -f relay` shows the startup line and the output dir
 Claude calls `create_scene` and the diagram appears live on your open canvas (or, in the
 file-mode fallback, is written as a `.excalidraw` file you open yourself).
 
+## Bug reports & feature requests
+
+Found a bug, or have an idea for something this should do? Open an issue on the
+[GitHub issues page](https://github.com/avajadi/excalidraw-mcp/issues) —
+[report a bug](https://github.com/avajadi/excalidraw-mcp/issues/new?labels=bug) or
+[request a feature](https://github.com/avajadi/excalidraw-mcp/issues/new?labels=enhancement).
+
 ## License
 
 Licensed under the [Apache License 2.0](LICENSE).
