@@ -7,9 +7,11 @@ import {
   buildScene,
   buildAddDelta,
   buildUpdateDelta,
+  buildUpdateWhereDelta,
   buildDeleteDelta,
   elementSchema,
   updatePatchSchema,
+  matchPatchSchema,
   type ElementSpec,
 } from "./excalidraw.js";
 import { applyOps, emptyScene, type Op, type Scene } from "./scene.js";
@@ -61,30 +63,6 @@ async function pushOps(id: string, ops: Op[]): Promise<void> {
   await fs.writeFile(resolveScenePath(id), JSON.stringify(merged, null, 2), "utf8");
 }
 
-// The relay knows where its output dir lives on the host (via EXCALIDRAW_HOST_DIR);
-// fetched once and cached so tools can report file paths the user can actually open.
-let hostDirCache: string | null | undefined; // undefined = not fetched yet
-
-/** Host-filesystem directory where the relay writes scenes/exports, or null. */
-async function relayHostDir(): Promise<string | null> {
-  if (!RELAY_URL) return null;
-  if (hostDirCache !== undefined) return hostDirCache;
-  try {
-    const res = await fetch(`${RELAY_URL}/hostdir`);
-    hostDirCache = res.ok ? ((await res.json()) as { dir: string | null }).dir : null;
-  } catch {
-    hostDirCache = null;
-  }
-  return hostDirCache;
-}
-
-/** Absolute host path of a scene's `.excalidraw` file, or null if unknown. */
-async function hostScenePath(id: string): Promise<string | null> {
-  if (!RELAY_URL) return resolveScenePath(id);
-  const dir = await relayHostDir();
-  return dir ? `${dir.replace(/\/+$/, "")}/${id}` : null;
-}
-
 /** The scene the browser currently has loaded, or null if none / no relay. */
 async function currentSceneId(): Promise<string | null> {
   if (!RELAY_URL) return null;
@@ -118,9 +96,7 @@ async function whereText(id: string): Promise<string> {
   if (!RELAY_URL) {
     return `Wrote ${resolveScenePath(id)} — open it in Excalidraw to view/edit.`;
   }
-  const host = await hostScenePath(id);
-  const fileNote = host ? ` File: ${host}` : "";
-  return `An open tab follows automatically; otherwise open: ${liveUrl(id)}.${fileNote}`;
+  return `An open tab follows automatically; otherwise open: ${liveUrl(id)}.`;
 }
 
 const server = new McpServer({ name: "excalidraw", version: "1.0.0" });
@@ -211,48 +187,106 @@ server.tool(
 
 server.tool(
   "update_element",
-  "Change one existing element by id: its colors/style, its label or text, " +
-    "and/or its position and size. Moving or resizing a shape recenters its " +
-    "label and reroutes any arrows bound to it. Use describe_scene to find ids.",
+  "Change one or more existing elements by id: colors/style, label or text, " +
+    "and/or position and size. The same patch is applied to every id. Moving or " +
+    "resizing a shape recenters its label and reroutes any arrows bound to it. " +
+    "Use describe_scene to find ids, or update_where to select by current style " +
+    "instead of by id.",
   {
     filename: z
       .string()
       .optional()
-      .describe("Scene containing the element. Omit to use the scene open in the browser."),
-    id: z.string().describe("Element id to change (from describe_scene)."),
+      .describe("Scene containing the element(s). Omit to use the scene open in the browser."),
+    id: z.string().optional().describe("Element id to change (from describe_scene)."),
+    ids: z
+      .array(z.string())
+      .min(1)
+      .optional()
+      .describe("Multiple element ids to apply the same patch to. Use instead of `id`."),
     patch: updatePatchSchema.describe("Fields to change; omit what stays the same."),
   },
-  async ({ filename, id, patch }) => {
+  async ({ filename, id, ids, patch }) => {
+    const targets = ids ?? (id ? [id] : []);
+    if (!targets.length) throw new Error("Provide `id` or `ids`.");
     const sid = await resolveScene(filename);
     const scene = await getScene(sid);
-    const ops = buildUpdateDelta(scene, id, patch);
+    const ops = targets.flatMap((t) => buildUpdateDelta(scene, t, patch));
     await pushOps(sid, ops);
     return {
-      content: [{ type: "text", text: `Updated '${id}' in '${sid}'. ${await whereText(sid)}` }],
+      content: [
+        {
+          type: "text",
+          text: `Updated ${targets.length} element(s) (${targets.join(", ")}) in '${sid}'. ${await whereText(sid)}`,
+        },
+      ],
     };
   },
 );
 
 server.tool(
   "delete_element",
-  "Delete one element by id. Deleting a shape also removes its label and any " +
-    "arrows bound to it (which would otherwise dangle). Use describe_scene for ids.",
+  "Delete one or more elements by id. Deleting a shape also removes its label " +
+    "and any arrows bound to it (which would otherwise dangle). Use describe_scene " +
+    "for ids.",
   {
     filename: z
       .string()
       .optional()
-      .describe("Scene containing the element. Omit to use the scene open in the browser."),
-    id: z.string().describe("Element id to delete (from describe_scene)."),
+      .describe("Scene containing the element(s). Omit to use the scene open in the browser."),
+    id: z.string().optional().describe("Element id to delete (from describe_scene)."),
+    ids: z
+      .array(z.string())
+      .min(1)
+      .optional()
+      .describe("Multiple element ids to delete at once. Use instead of `id`."),
   },
-  async ({ filename, id }) => {
+  async ({ filename, id, ids }) => {
+    const targets = ids ?? (id ? [id] : []);
+    if (!targets.length) throw new Error("Provide `id` or `ids`.");
     const sid = await resolveScene(filename);
     const scene = await getScene(sid);
-    const ops = buildDeleteDelta(scene, id);
+    const ops = targets.flatMap((t) => buildDeleteDelta(scene, t));
     await pushOps(sid, ops);
-    const removed = ops.filter((o) => o.type === "delete").length;
+    const removed = new Set(ops.filter((o) => o.type === "delete").map((o) => o.id)).size;
     return {
       content: [
         { type: "text", text: `Deleted ${removed} element(s) from '${sid}'. ${await whereText(sid)}` },
+      ],
+    };
+  },
+);
+
+server.tool(
+  "update_where",
+  "Restyle every element whose CURRENT properties match `match`, in one call — " +
+    "e.g. every element with strokeColor '#e03131' to strokeColor '#E83C63'. Use " +
+    "this instead of update_element per id for palette swaps or other bulk " +
+    "restyles. Matches the same elements describe_scene lists (no bound labels, " +
+    "target their container's `label` field instead). Reports the ids it touched.",
+  {
+    filename: z
+      .string()
+      .optional()
+      .describe("Scene to restyle. Omit to use the scene open in the browser."),
+    match: matchPatchSchema.describe(
+      "Current values elements must have to be selected. At least one field required.",
+    ),
+    patch: updatePatchSchema.describe("Fields to change on every matched element."),
+  },
+  async ({ filename, match, patch }) => {
+    const sid = await resolveScene(filename);
+    const scene = await getScene(sid);
+    const { ops, ids } = buildUpdateWhereDelta(scene, match, patch);
+    if (!ids.length) {
+      return { content: [{ type: "text", text: `No elements matched in '${sid}'.` }] };
+    }
+    await pushOps(sid, ops);
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Updated ${ids.length} element(s) in '${sid}': ${ids.join(", ")}. ${await whereText(sid)}`,
+        },
       ],
     };
   },
@@ -288,6 +322,17 @@ server.tool(
           w: Math.round(e.width as number),
           h: Math.round(e.height as number),
         };
+        row.stroke = e.strokeColor;
+        row.bg = e.backgroundColor;
+        if (e.strokeStyle !== "solid") row.strokeStyle = e.strokeStyle;
+        if (e.strokeWidth !== 2) row.strokeWidth = e.strokeWidth;
+        if (e.fillStyle !== "solid") row.fillStyle = e.fillStyle;
+        if (e.roughness !== 1) row.roughness = e.roughness;
+        if (e.type === "text") row.fontSize = e.fontSize;
+        if (e.type === "arrow" || e.type === "line") {
+          row.startArrowhead = e.startArrowhead ?? null;
+          row.endArrowhead = e.endArrowhead ?? null;
+        }
         if (e.type === "text") {
           row.text = e.text;
         } else if (e.type === "arrow" || e.type === "line") {
@@ -298,7 +343,11 @@ server.tool(
             (b) => b.type === "text",
           );
           const lblEl = lbl ? byId.get(lbl.id) : undefined;
-          if (lblEl && !lblEl.isDeleted) row.label = lblEl.text ?? "";
+          if (lblEl && !lblEl.isDeleted) {
+            row.label = lblEl.text ?? "";
+            row.labelColor = lblEl.strokeColor;
+            row.labelFontSize = lblEl.fontSize;
+          }
         }
         return row;
       });
@@ -312,12 +361,12 @@ server.tool(
 
 server.tool(
   "list_scenes",
-  "List the .excalidraw scenes that exist, with their file paths (host-absolute " +
-    "when the relay knows the host directory).",
+  "List the .excalidraw scenes that exist, so you can pick a `filename` to pass " +
+    "to the other tools.",
   {},
   async () => {
     // With a relay, the files live where the relay runs (possibly another host /
-    // container), so ask it for the list and report host paths it can resolve.
+    // container) — ask it for the list of scene names.
     if (RELAY_URL) {
       let list: Array<{ id: string; name: string }> = [];
       try {
@@ -326,10 +375,7 @@ server.tool(
       } catch {
         // relay unreachable
       }
-      const dir = await relayHostDir();
-      const text = list.length
-        ? list.map((s) => (dir ? `${dir.replace(/\/+$/, "")}/${s.id}` : s.id)).join("\n")
-        : "No scenes found.";
+      const text = list.length ? list.map((s) => s.name).join("\n") : "No scenes found.";
       return { content: [{ type: "text", text }] };
     }
 
@@ -372,14 +418,12 @@ server.tool(
   {},
   async () => {
     const id = await currentSceneId();
-    const host = id ? await hostScenePath(id) : null;
     return {
       content: [
         {
           type: "text",
           text: id
-            ? `Current scene: ${id.replace(/\.excalidraw$/, "")} (${id})` +
-              (host ? `\nFile: ${host}` : "")
+            ? `Current scene: ${id.replace(/\.excalidraw$/, "")} (${id})`
             : RELAY_URL
               ? "No scene is currently loaded in the browser."
               : "No relay is configured, so there is no 'current scene'. Pass filenames explicitly.",
@@ -445,6 +489,46 @@ server.tool(
     return {
       content: [
         { type: "text", text: `Exported '${id}' to SVG → ${result.path}\n\n${result.data}` },
+      ],
+    };
+  },
+);
+
+server.tool(
+  "reload_scene",
+  "Re-sync a scene from its .excalidraw file on disk into the relay and every " +
+    "open browser tab. For when the file changed from OUTSIDE this MCP server — " +
+    "a human hand-editing the JSON, or another tool exporting into it. Not for " +
+    "your own edits: those already go live immediately via the other tools.",
+  {
+    filename: z
+      .string()
+      .optional()
+      .describe("Scene to reload. Omit to use the scene open in the browser."),
+  },
+  async ({ filename }) => {
+    if (!RELAY_URL) {
+      throw new Error(
+        "reload_scene needs a relay; in file-mode every read already hits disk directly.",
+      );
+    }
+    const id = await resolveScene(filename);
+    const res = await fetch(`${RELAY_URL}/scene/${encodeURIComponent(id)}/reload`, {
+      method: "POST",
+    });
+    if (res.status === 404) {
+      throw new Error(`No scene file found for '${id}'.`);
+    }
+    if (!res.ok) {
+      throw new Error(`Reload failed (${res.status}): ${await res.text()}`);
+    }
+    const result = (await res.json()) as { elements: number };
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Reloaded '${id}' from disk (${result.elements} element(s)). ${await whereText(id)}`,
+        },
       ],
     };
   },

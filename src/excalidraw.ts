@@ -453,12 +453,32 @@ export const updatePatchSchema = z.object({
 });
 export type UpdatePatch = z.infer<typeof updatePatchSchema>;
 
+/** Same fields as `updatePatchSchema`, used as an equality filter in `update_where`. */
+export const matchPatchSchema = updatePatchSchema.refine(
+  (m) => Object.values(m).some((v) => v !== undefined),
+  { message: "match must specify at least one field" },
+);
+
 /** Find the bound text label of a container element, if any. */
 function boundLabel(el: AnyElement, byId: Map<string, AnyElement>): AnyElement | undefined {
   for (const b of (el.boundElements ?? []) as Array<{ type: string; id: string }>) {
     if (b.type === "text") return byId.get(b.id);
   }
   return undefined;
+}
+
+/** Whether `el`'s current values match every field set in `match`. */
+function matchesFilter(el: AnyElement, byId: Map<string, AnyElement>, match: UpdatePatch): boolean {
+  for (const [key, want] of Object.entries(match) as [keyof UpdatePatch, unknown][]) {
+    if (want === undefined) continue;
+    if (key === "label") {
+      const current = el.type === "text" ? el.text : boundLabel(el, byId)?.text;
+      if (current !== want) return false;
+    } else if ((el as Record<string, unknown>)[key] !== want) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** Build the ops to update one element's appearance, text, and/or geometry. */
@@ -517,6 +537,28 @@ export function buildUpdateDelta(scene: Scene, id: string, patch: UpdatePatch): 
 
   for (const t of touched) bumpVersion(t);
   return [...touched].map((element) => ({ type: "upsert", element: element as Element }));
+}
+
+/**
+ * Build the ops to apply `patch` to every element currently matching `match`
+ * (same filtering as describe_scene: no tombstones, no bound labels — those
+ * are addressed via their container's `label` field).
+ */
+export function buildUpdateWhereDelta(
+  scene: Scene,
+  match: UpdatePatch,
+  patch: UpdatePatch,
+): { ops: Op[]; ids: string[] } {
+  const byId = new Map<string, AnyElement>();
+  for (const el of scene.elements ?? []) byId.set(el.id, el as AnyElement);
+  const targets = (scene.elements ?? []).filter(
+    (e) =>
+      !(e as AnyElement).isDeleted &&
+      !((e as AnyElement).type === "text" && (e as AnyElement).containerId) &&
+      matchesFilter(e as AnyElement, byId, match),
+  ) as AnyElement[];
+  const ops = targets.flatMap((el) => buildUpdateDelta(scene, el.id, patch));
+  return { ops, ids: targets.map((e) => e.id) };
 }
 
 /**

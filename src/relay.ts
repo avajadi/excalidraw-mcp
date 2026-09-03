@@ -230,6 +230,7 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     const opsMatch = url.pathname.match(/^\/scene\/(.+)\/ops$/);
     const exportMatch = url.pathname.match(/^\/scene\/(.+)\/export$/);
+    const reloadMatch = url.pathname.match(/^\/scene\/(.+)\/reload$/);
     const sceneMatch = url.pathname.match(/^\/scene\/(.+)$/);
 
     // Incremental, non-destructive edits: apply id-keyed ops to the live scene
@@ -279,6 +280,23 @@ const server = http.createServer(async (req, res) => {
       } catch (err) {
         sendJson(res, 504, { error: String(err) });
       }
+      return;
+    }
+
+    // Re-read a scene from disk, discarding whatever's cached in memory, and
+    // broadcast the fresh copy. For picking up edits made outside this MCP
+    // server entirely (a human hand-editing the file, another tool exporting
+    // into it) — the disk read happens here, not in the MCP/Claude process.
+    if (reloadMatch && req.method === "POST") {
+      const id = sceneId(decodeURIComponent(reloadMatch[1]));
+      scenes.delete(id);
+      const fresh = await loadScene(id);
+      if (!fresh) {
+        sendJson(res, 404, { error: `No scene file for '${id}'` });
+        return;
+      }
+      await setScene(id, fresh, { activate: true });
+      sendJson(res, 200, { ok: true, id, elements: fresh.elements?.length ?? 0 });
       return;
     }
 
