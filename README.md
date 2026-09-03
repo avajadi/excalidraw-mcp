@@ -18,21 +18,18 @@ For how to drive it once it's running — drawing, describing the live canvas, a
 ## Getting started
 
 The published image ([`avajadi/excalidraw-mcp-relay`](https://hub.docker.com/r/avajadi/excalidraw-mcp-relay))
-runs both roles, so the whole setup is two steps and no Node on the host. First start the
-persistent relay with the [`docker-compose.yaml`](docker-compose.yaml) in this repo (it serves
-the live canvas at `localhost:3030` and survives across sessions):
+serves MCP itself, directly over HTTP, so the whole setup is two steps and no Node on the
+host. First start the relay with the [`docker-compose.yaml`](docker-compose.yaml) in this repo
+(it serves the live canvas at `localhost:3030` and survives across sessions):
 
 ```bash
 docker compose up -d
 ```
 
-Then register the MCP — the same image, run per session over stdio — with Claude:
+Then register it with Claude as an HTTP MCP server:
 
 ```bash
-claude mcp add excalidraw -- \
-  docker run -i --rm --no-healthcheck --network excalidraw \
-  -e EXCALIDRAW_RELAY_URL=http://relay:3030 \
-  avajadi/excalidraw-mcp-relay mcp
+claude mcp add --transport http excalidraw http://localhost:3030/mcp
 ```
 
 Open `http://localhost:3030/` and ask Claude to draw — the diagram appears live on the canvas.
@@ -48,15 +45,17 @@ binding geometry) are recomputed by Excalidraw on import, so output stays valid.
 
 - **`create_scene`** — `{ filename, elements[], viewBackgroundColor? }` → creates a NEW scene, replacing any with that name.
 - **`add_elements`** — `{ filename, elements[] }` → adds shapes to an existing scene **without disturbing** what's already there (including anything you drew by hand). New arrows may bind to existing element ids. Returns the created ids.
-- **`update_element`** — `{ filename, id, patch }` → changes one element's style, label/text, and/or position & size. Moving or resizing recenters its label and reroutes bound arrows.
-- **`delete_element`** — `{ filename, id }` → deletes one element, cascading its label and any arrows bound to it.
-- **`describe_scene`** — `{ filename }` → compact, id-focused list of the current elements (reflects live browser edits) so Claude can target them.
+- **`update_element`** — `{ filename, id | ids[], patch }` → changes one or more elements' style, label/text, and/or position & size (same patch applied to every id). Moving or resizing recenters the label and reroutes bound arrows.
+- **`update_where`** — `{ filename, match, patch }` → restyles every element whose *current* properties match `match` in one call — a palette swap without listing ids one at a time.
+- **`delete_element`** — `{ filename, id | ids[] }` → deletes one or more elements, cascading their labels and any arrows bound to them.
+- **`describe_scene`** — `{ filename }` → compact, id-focused list of the current elements — geometry, style (`stroke`/`bg`/etc.), and labels — (reflects live browser edits) so Claude can target or restyle them.
 - **`current_scene`** — `{}` → reports which scene the user has open in the browser (set by the scene picker or by following Claude's drawing).
-- **`list_scenes`** — lists generated files.
+- **`list_scenes`** — lists the scenes that exist, by name.
 - **`read_scene`** — `{ filename }` → returns the scene's raw JSON.
 - **`export_scene`** — `{ filename, format?, scale?, background? }` → renders the scene to **PNG or SVG** using the browser's own exporter (the same path as Excalidraw's "Export image" menu), writes it next to the `.excalidraw` file, and returns the image. `background` (default `true`) toggles the canvas background — set it `false` for a transparent PNG / no background rectangle in the SVG. Requires the relay **and** an open browser tab viewing the scene.
+- **`reload_scene`** — `{ filename }` → re-reads a scene's `.excalidraw` file from disk into the relay and every open tab, for picking up an edit made outside this MCP server (a human hand-editing the file, or another tool exporting into it) without silently losing it on the next sync. Requires a relay.
 
-`add_elements` / `update_element` / `delete_element` apply id-keyed merge ops rather than replacing the scene, so Claude and the browser can co-edit the same drawing. These go to the relay via `POST /scene/:id/ops`; in the file-mode fallback the same merge is applied directly to the `.excalidraw` file.
+`add_elements` / `update_element` / `update_where` / `delete_element` apply id-keyed merge ops rather than replacing the scene, so Claude and the browser can co-edit the same drawing. These go to the relay via `POST /scene/:id/ops`; in the file-mode fallback the same merge is applied directly to the `.excalidraw` file.
 
 `export_scene` works differently: image rendering needs a canvas and fonts, which only exist in the browser. The relay asks a connected tab (via `POST /scene/:id/export`) to render the scene and POST the bytes back over the WebSocket, then writes the `.png`/`.svg` into the output dir. With no relay, or no tab viewing the scene, the export fails with a message telling you to open it.
 
@@ -89,7 +88,13 @@ npm run build
 ## Register with Claude Code
 
 Start the relay first (see [Live view](#live-view), or [Docker](#docker-relay--web) for the
-usual path), then register the server pointing at it with `EXCALIDRAW_RELAY_URL`:
+usual path), then register it with Claude as an HTTP MCP server:
+
+```bash
+claude mcp add --transport http excalidraw http://localhost:3030/mcp
+```
+
+**Prefer stdio, or running the server on the host with no relay at all (file-mode)?**
 
 ```bash
 claude mcp add excalidraw \
@@ -122,20 +127,25 @@ so the MCP server doesn't need it.
 Live mode adds two pieces:
 
 - a long-lived **relay** (`dist/relay.js`) that holds each scene in memory, persists it to
-  the same `.excalidraw` files, and pushes updates over WebSocket; and
+  the same `.excalidraw` files, pushes updates over WebSocket, *and* serves MCP itself over
+  HTTP at `/mcp`; and
 - a **companion web app** (`web/`) that embeds the real Excalidraw editor and connects to
   the relay.
 
-The relay is a *separate, always-on process* — the MCP server is spawned per Claude
-session and is ephemeral, so it can't host the browser connection itself. The MCP server
-just `POST`s scenes to the relay when `EXCALIDRAW_RELAY_URL` is set; with it unset it falls
-back to writing files exactly as before.
+The usual setup is Claude talking MCP straight to the relay over HTTP:
 
 ```
-Claude ─stdio─▶ MCP server ─HTTP─▶ relay ─WebSocket─▶ browser (companion app)
-                                     ▲                    │
-                                     └──── edits back ◀───┘   (also written to .excalidraw)
+Claude ─HTTP (/mcp)─▶ relay ─WebSocket─▶ browser (companion app)
+                         ▲                    │
+                         └──── edits back ◀───┘   (also written to .excalidraw)
 ```
+
+The standalone stdio server (`dist/index.js`) still exists for running on the host instead —
+useful if you'd rather not run the relay in Docker, or want pure file-mode with no relay at
+all. It's spawned per Claude session and is ephemeral, so it can't host the browser connection
+itself; it just `POST`s scenes to the relay over HTTP when `EXCALIDRAW_RELAY_URL` is set
+(`Claude ─stdio─▶ MCP server ─HTTP─▶ relay ─...`, same relay behind it either way), or falls
+back to writing files directly when it's unset.
 
 ### Build and run
 
@@ -147,13 +157,10 @@ npm run build:web              # install + build the companion app into web/dist
 EXCALIDRAW_OUTPUT_DIR=/path/to/your/scenes RELAY_PORT=3030 npm run relay
 ```
 
-Then register the MCP server pointing at the relay:
+Then register it with Claude:
 
 ```bash
-claude mcp add excalidraw \
-  --env EXCALIDRAW_OUTPUT_DIR=/path/to/your/scenes \
-  --env EXCALIDRAW_RELAY_URL=http://localhost:3030 \
-  -- node /absolute/path/to/excalidraw-mcp/dist/index.js
+claude mcp add --transport http excalidraw http://localhost:3030/mcp
 ```
 
 Open `http://localhost:3030/` once in your browser. Whenever Claude draws, the relay tells
@@ -169,15 +176,17 @@ files itself, so only the relay needs the output directory.
 
 Set `EXCALIDRAW_HOST_DIR` on the relay to the host path that `EXCALIDRAW_OUTPUT_DIR` is
 mounted from (only meaningful when the relay runs in a container — it can't discover its
-own bind-mount source). The relay then reports **host-absolute** file paths back to the
-MCP, so `export_scene`, `list_scenes`, `current_scene`, and the create/add/update tools
-tell you the real path you can open on the host instead of the in-container `/data` path.
+own bind-mount source). The relay then reports a **host-absolute** path back for
+`export_scene`'s output, instead of the in-container `/data` path. (The other tools no
+longer surface a host path at all in relay mode, on purpose — nothing about editing a scene
+should invite reading or writing the `.excalidraw` file directly instead of through the MCP
+tools.)
 
 ### Docker (relay + web)
 
 The relay and the companion app are one process, so they ship as **one image** (built by
-the included multi-stage `Dockerfile`). The MCP server is *not* containerized as a service —
-Claude spawns it on the host over stdio and it reaches the relay over the published port.
+the included multi-stage `Dockerfile`). That image serves MCP itself over HTTP too, so it's
+the only container you need — no separate MCP process or image.
 
 ```bash
 # build + start the relay (serves the web app on http://localhost:3030)
@@ -195,40 +204,19 @@ Scenes persist in the `excalidraw-scenes` named volume (mounted at `/data`, the 
 `EXCALIDRAW_OUTPUT_DIR`). To use a host directory instead, swap the volume for a bind mount,
 e.g. `-v /path/to/scenes:/data`.
 
-Then point the (host-side) MCP server at the container and register it with Claude:
+Then register it with Claude as an HTTP MCP server:
 
 ```bash
-claude mcp add excalidraw \
-  --env EXCALIDRAW_RELAY_URL=http://localhost:3030 \
-  -- node /absolute/path/to/excalidraw-mcp/dist/index.js
+claude mcp add --transport http excalidraw http://localhost:3030/mcp
 ```
 
 Open `http://localhost:3030/` and use it exactly as above. The compose file binds the port
-to `127.0.0.1` because the scene API and WebSocket are **unauthenticated** — if you expose
-the relay beyond localhost, put an authenticating TLS proxy in front of it.
+to `127.0.0.1` because the scene API, WebSocket, and MCP endpoint are all
+**unauthenticated** — if you expose the relay beyond localhost, put an authenticating TLS
+proxy in front of it.
 
 To verify the container is up: `curl localhost:3030/scenes` returns a JSON list (`[]` when
 empty); `docker compose logs -f relay` shows the startup line and the output dir.
-
-#### Running the MCP in Docker too (no Node on the host)
-
-The published image ships **both** roles: `relay` (the default) and `mcp`. So if you'd rather
-not run Node on the host, you don't need a second image — register the same image as the MCP
-with the `mcp` argument. It runs per-session over stdio and connects to the long-lived relay
-container; the relay (and your live canvas) keeps running between sessions.
-
-With the relay started via `docker compose up -d` (it joins the `excalidraw` network):
-
-```bash
-claude mcp add excalidraw -- \
-  docker run -i --rm --no-healthcheck --network excalidraw \
-  -e EXCALIDRAW_RELAY_URL=http://relay:3030 \
-  avajadi/excalidraw-mcp-relay mcp
-```
-
-`--network excalidraw` joins the relay's network; `relay:3030` is the relay container's
-hostname on it. The MCP container is throwaway (one per session); the relay is the persistent
-one that keeps your canvas alive.
 
 ## Example prompt
 

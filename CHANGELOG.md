@@ -4,6 +4,36 @@ All notable changes to this project are documented here, newest first. The
 format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## 2.0.0-rc1 - 2026-09-03
+
+### Added
+
+- The relay now serves MCP **directly over HTTP**, at `POST/GET/DELETE /mcp` (Streamable
+  HTTP, stateless — a fresh `McpServer` per request, since every tool call already fetches
+  scene state fresh; no session bookkeeping needed). Register it with:
+  `claude mcp add --transport http excalidraw http://localhost:3030/mcp`. This is now the
+  primary way to connect Claude — no Node on the host, no per-session container spawn.
+- The tool set moved into a shared `src/mcp-tools.ts` (`createServer(relayUrl)`), used by
+  both the new `/mcp` route and the existing stdio server (`src/index.ts`, still available
+  for running on the host, or pure file-mode with no relay).
+
+### Removed (breaking)
+
+- The Docker image's `mcp` role is gone: `docker run <image> mcp` no longer starts a stdio
+  MCP server — it now just tries (and fails) to exec a command named `mcp`. It existed only
+  to bridge Docker → stdio → HTTP-to-relay, which is now redundant now that the relay speaks
+  MCP natively. Along with it: the image `HEALTHCHECK`'s role-detection workaround (added in
+  1.3.1), and the `excalidraw` Docker network in `docker-compose.yaml` (it existed solely so
+  an `mcp`-role container could reach the relay by hostname).
+- If you have `docker run ... avajadi/excalidraw-mcp-relay mcp` registered anywhere, switch
+  it to `claude mcp add --transport http excalidraw http://localhost:3030/mcp` (or, to keep
+  using stdio, run `dist/index.js` directly — see the README).
+
+### Changed
+
+- `@modelcontextprotocol/sdk` dependency floor raised to `^1.29.0` (from `^1.12.0`), the
+  version this was built and tested against — it's what ships `StreamableHTTPServerTransport`.
+
 ## 1.4.0 - 2026-09-03
 
 ### Added
