@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 
 # Builds the long-lived relay together with the web (companion app) bundle it
-# serves. This image is the live-view service; the MCP server itself stays on the
-# host (Claude spawns it over stdio) and only needs to reach this container.
+# serves. The relay serves MCP itself, directly over HTTP at /mcp — Claude
+# connects straight to it, no separate MCP process or container needed.
 
 # ---- Stage 1: compile the relay (TypeScript -> dist/) ----------------------
 FROM node:24-alpine AS server-build
@@ -42,13 +42,8 @@ RUN mkdir -p /data
 VOLUME ["/data"]
 
 EXPOSE 3030
-# Healthcheck only makes sense for the relay role; the stdio mcp role has no HTTP
-# port, so it reports healthy as soon as it is running (the entrypoint records the
-# role in /tmp/excalidraw-role). Without this an mcp container is always unhealthy.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD if [ "$(cat /tmp/excalidraw-role 2>/dev/null)" = mcp ]; then exit 0; fi; \
-      wget -qO- "http://127.0.0.1:${RELAY_PORT}/scenes" >/dev/null 2>&1 || exit 1
+  CMD wget -qO- "http://127.0.0.1:${RELAY_PORT}/scenes" >/dev/null 2>&1 || exit 1
 
-# Default role is the relay; `mcp` selects the stdio MCP server (see entrypoint).
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["relay"]

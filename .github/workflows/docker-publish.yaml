@@ -97,7 +97,17 @@ jobs:
 
       - name: Read version from package.json
         id: pkg
-        run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
+        run: |
+          version=$(jq -r .version package.json)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # Semver prerelease (e.g. 2.0.0-rc1): a hyphen before the prerelease
+          # identifiers is what marks it as such. Used to keep :latest off
+          # prereleases below — an RC shouldn't silently become :latest.
+          if [[ "$version" == *-* ]]; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Download digests
         uses: actions/download-artifact@v4
@@ -120,7 +130,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && steps.pkg.outputs.is_prerelease != 'true' }}
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3

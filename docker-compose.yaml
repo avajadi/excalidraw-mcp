@@ -1,12 +1,12 @@
-# The relay + web companion app as one service. The MCP server is NOT a service
-# here: Claude spawns it on the host over stdio and points it at this relay via
-# EXCALIDRAW_RELAY_URL=http://localhost:3030 (see README).
+# The relay + web companion app as one service — it also serves MCP itself,
+# directly over HTTP at /mcp. Point Claude at it with:
+#   claude mcp add --transport http excalidraw http://localhost:3030/mcp
 services:
   relay:
     build: .
     image: excalidraw-mcp-relay
     container_name: excalidraw-relay
-    # Bind to localhost only — the scene API and WebSocket are unauthenticated.
+    # Bind to localhost only — the scene API, WebSocket, and MCP endpoint are unauthenticated.
     ports:
       - "127.0.0.1:3030:3030"
     environment:
@@ -25,17 +25,7 @@ services:
       #   - /home/you/excalidraw/scenes:/data
       # and add `user: "1000:1000"` (your uid:gid) so the files stay yours, and set
       # EXCALIDRAW_HOST_DIR above to the same host path.
-    networks:
-      - excalidraw
     restart: unless-stopped
 
 volumes:
   excalidraw-scenes:
-
-# Named so the MCP container can join it and reach the relay as http://relay:3030:
-#   docker run -i --rm --network excalidraw \
-#     -e EXCALIDRAW_RELAY_URL=http://relay:3030 \
-#     avajadi/excalidraw-mcp-relay mcp
-networks:
-  excalidraw:
-    name: excalidraw

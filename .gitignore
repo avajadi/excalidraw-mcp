@@ -3,3 +3,4 @@ dist/
 scenes/
 *.log
 .idea/
+/PROPOSED-CHANGES.md

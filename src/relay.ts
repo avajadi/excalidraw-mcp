@@ -2,14 +2,15 @@
 /**
  * Long-lived relay for live Excalidraw viewing.
  *
- * - The MCP server POSTs full scenes here (keyed by scene id / filename).
+ * - Serves MCP itself, directly over HTTP at `/mcp` (Streamable HTTP, stateless —
+ *   see the `/mcp` route below) — the normal way to connect Claude, no separate
+ *   MCP process needed. A standalone stdio MCP server (`index.ts`, e.g. run on
+ *   the host or in pure file-mode with no relay) can still POST scenes here too;
+ *   both speak the same scene API.
  * - Browsers running the companion app subscribe over WebSocket per scene.
  * - The relay holds the current scene in memory, persists it to a `.excalidraw`
  *   file (durable backup, keeps the file-based tools working), and broadcasts
  *   every change to the other connected clients.
- *
- * It is a *separate* process from the MCP server: the MCP server is spawned per
- * Claude session and is ephemeral, while a browser connection must outlive it.
  */
 import * as http from "node:http";
 import { promises as fs, createReadStream } from "node:fs";
@@ -17,11 +18,17 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { OUTPUT_DIR, sceneId, resolveScenePath } from "./paths.js";
 import { applyOps, emptyScene, type Op, type Scene } from "./scene.js";
+import { createServer as createMcpServer } from "./mcp-tools.js";
 
 const PORT = Number(process.env.RELAY_PORT ?? 3030);
 const WEB_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "web", "dist");
+// The shared tool set (mcp-tools.ts) always talks to "the relay" over HTTP, even
+// when it's being served BY the relay itself — a loopback call to its own port
+// is cheap and keeps every tool (getScene/pushOps/etc.) unchanged either way.
+const SELF_URL = `http://localhost:${PORT}`;
 
 /**
  * Where OUTPUT_DIR is mounted on the host. A container can't discover its own
@@ -232,6 +239,23 @@ const server = http.createServer(async (req, res) => {
     const exportMatch = url.pathname.match(/^\/scene\/(.+)\/export$/);
     const reloadMatch = url.pathname.match(/^\/scene\/(.+)\/reload$/);
     const sceneMatch = url.pathname.match(/^\/scene\/(.+)$/);
+
+    // MCP itself, served directly over Streamable HTTP. Stateless: every tool
+    // call already fetches scene state fresh per call (nothing lives in
+    // per-connection memory), so a fresh McpServer per request costs nothing
+    // and sidesteps session bookkeeping entirely — the SDK's own recommended
+    // shape for "simple API-style servers" like this one.
+    if (url.pathname === "/mcp") {
+      const mcpServer = createMcpServer(SELF_URL);
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+      await mcpServer.connect(transport);
+      res.on("close", () => {
+        transport.close();
+        mcpServer.close();
+      });
+      await transport.handleRequest(req, res);
+      return;
+    }
 
     // Incremental, non-destructive edits: apply id-keyed ops to the live scene
     // and broadcast the merged result. This is how Claude co-edits a scene the

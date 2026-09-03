@@ -1,6 +1,6 @@
 {
   "name": "excalidraw-mcp",
-  "version": "1.4.0",
+  "version": "2.0.0-rc1",
   "description": "MCP server that generates .excalidraw scene files from high-level shape specs.",
   "license": "Apache-2.0",
   "type": "module",
@@ -21,7 +21,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "ws": "^8.18.0",
     "zod": "^3.23.8"
   },
